@@ -95,3 +95,61 @@ Tipos aceitos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
 | `fix: ...`, `perf: ...`, `revert: ...` | `PATCH` |
 | `feat!: ...` ou rodapé `BREAKING CHANGE:` | `MAJOR` |
 | demais tipos | nenhum |
+
+## Armadilhas do release-please neste arranjo
+
+Quatro comportamentos do release-please que quebram este fluxo silenciosamente —
+todos encontrados rodando o fluxo de ponta a ponta, não lendo a documentação.
+
+### 1. `pull-request-title-pattern` exige `${scope}` e `${component}`
+
+Um padrão que não contenha **os dois** placeholders é descartado inteiro, sem
+erro: o release-please loga `pullRequestTitlePattern miss the part of '${scope}'`
+e cai no título genérico `chore: release <branch>`.
+
+```jsonc
+// descartado silenciosamente
+"pull-request-title-pattern": "chore(release): release candidate v${version}"
+
+// aceito
+"pull-request-title-pattern": "chore${scope}: release candidate${component} v${version}"
+```
+
+### 2. `package-name` impede o `github-release` de reconhecer o próprio PR
+
+Com `package-name` definido, o release-please espera esse componente no título
+do Release PR. Num repositório de pacote único o título não o carrega, e o
+`github-release` recusa o PR que ele mesmo abriu:
+
+```
+⚠ PR component: undefined does not match configured component: testerelease
+[]
+```
+
+O `release-pr` funciona, o PR é mergeado, o changelog é atualizado — e **nenhuma
+tag ou release é criada**. O workflow termina verde. A correção é omitir
+`package-name` em repositórios de pacote único.
+
+### 3. A primeira release ignora o modo prerelease
+
+Sem uma release anterior, o release-please usa a `initial-version` (`1.0.0` por
+padrão) diretamente, sem passar pelo versioning strategy. Com `prerelease: true`
+configurado, a primeira release candidate sai como `1.0.0` — **sem o sufixo
+`-rc`**.
+
+Por isso existe a tag `v0.0.0` no commit inicial: ela dá aos dois tracks um
+ponto de partida, e todo cálculo seguinte passa pelo strategy normalmente.
+
+### 4. `refs/pull/N/merge` não é legível pelo release-please
+
+Para prever a versão antes do merge seria natural apontar o dry-run para o merge
+simulado do PR. O release-please até lê os arquivos de config desse ref (via
+Contents API), mas a busca de commits é uma query GraphQL por branch:
+
+```
+⚠ Could not find commits for branch refs/pull/5/merge - it likely does not exist.
+```
+
+O workflow de preview contorna isso publicando o merge simulado como uma branch
+efêmera (`release-please-preview/pr-N`), rodando o dry-run contra ela e
+removendo-a no fim (`if: always()`).

@@ -8,26 +8,72 @@
   "include-component-in-tag": false,
   "bump-minor-pre-major": false,
   "bump-patch-for-minor-pre-major": false,
-  "separate-pull-requests": false,
-  "pull-request-title-pattern": "chore(release): release candidate v${version}",
+  "separate-pull-requests": true,
+  "pull-request-title-pattern": "chore${scope}: release candidate${component} v${version}",
   "pull-request-header": "🧪 Release Candidate — versão em homologação (staging)",
   "changelog-path": "CHANGELOG-RC.md",
   "changelog-sections": [
-    { "type": "feat", "section": "✨ Funcionalidades", "hidden": false },
-    { "type": "fix", "section": "🐛 Correções", "hidden": false },
-    { "type": "perf", "section": "⚡ Performance", "hidden": false },
-    { "type": "revert", "section": "⏪ Revertidos", "hidden": false },
-    { "type": "refactor", "section": "♻️ Refatorações", "hidden": false },
-    { "type": "docs", "section": "📚 Documentação", "hidden": false },
-    { "type": "build", "section": "📦 Build", "hidden": false },
-    { "type": "ci", "section": "🤖 CI/CD", "hidden": false },
-    { "type": "test", "section": "✅ Testes", "hidden": true },
-    { "type": "style", "section": "💄 Estilo", "hidden": true },
-    { "type": "chore", "section": "🔧 Manutenção", "hidden": true }
+    {
+      "type": "feat",
+      "section": "✨ Funcionalidades",
+      "hidden": false
+    },
+    {
+      "type": "fix",
+      "section": "🐛 Correções",
+      "hidden": false
+    },
+    {
+      "type": "perf",
+      "section": "⚡ Performance",
+      "hidden": false
+    },
+    {
+      "type": "revert",
+      "section": "⏪ Revertidos",
+      "hidden": false
+    },
+    {
+      "type": "refactor",
+      "section": "♻️ Refatorações",
+      "hidden": false
+    },
+    {
+      "type": "docs",
+      "section": "📚 Documentação",
+      "hidden": false
+    },
+    {
+      "type": "build",
+      "section": "📦 Build",
+      "hidden": false
+    },
+    {
+      "type": "ci",
+      "section": "🤖 CI/CD",
+      "hidden": false
+    },
+    {
+      "type": "test",
+      "section": "✅ Testes",
+      "hidden": true
+    },
+    {
+      "type": "style",
+      "section": "💄 Estilo",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "🔧 Manutenção",
+      "hidden": true
+    }
   ],
   "packages": {
     ".": {
-      "package-name": "testerelease"
+      "prerelease": true,
+      "prerelease-type": "rc",
+      "versioning": "prerelease"
     }
   }
 }

@@ -9,7 +9,9 @@ on:
     branches: [release]
 
 permissions:
-  contents: read
+  # `write` porque o preview publica (e remove) a branch efêmera com o merge
+  # simulado. PRs vindos de fork recebem token somente-leitura de qualquer forma.
+  contents: write
   pull-requests: write
 
 concurrency:
@@ -36,20 +38,68 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
-      - name: release-please (dry-run) sobre o merge simulado do PR
+      # O release-please busca commits por branch via GraphQL e não enxerga
+      # `refs/pull/N/merge`. Publicar o merge simulado como uma branch efêmera
+      # é o que permite rodar o cálculo real sobre o resultado do merge.
+      - name: Publicar merge simulado como branch efêmera
+        id: ephemeral
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          REF="release-please-preview/pr-${PR_NUMBER}"
+
+          # O GitHub calcula o merge commit de forma assíncrona: no evento
+          # `opened` o payload traz `merge_commit_sha: null`. É preciso esperar
+          # `mergeable` deixar de ser null para saber se há SHA ou conflito.
+          MERGE_SHA=""
+          for attempt in $(seq 1 20); do
+            PR_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+            MERGEABLE=$(jq -r '.mergeable' <<<"$PR_JSON")
+            CANDIDATE=$(jq -r '.merge_commit_sha // empty' <<<"$PR_JSON")
+
+            if [ "$MERGEABLE" = "true" ] && [ -n "$CANDIDATE" ]; then
+              MERGE_SHA="$CANDIDATE"
+              break
+            fi
+            if [ "$MERGEABLE" = "false" ]; then
+              echo "::warning::O PR tem conflitos com a branch alvo; não há merge simulado para analisar."
+              echo "ref=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "  aguardando o GitHub calcular o merge commit (tentativa ${attempt}, mergeable=${MERGEABLE})..."
+            sleep 3
+          done
+
+          if [ -z "${MERGE_SHA}" ]; then
+            echo "::warning::O GitHub não calculou o merge commit a tempo. Dry-run pulado; a projeção abaixo segue válida."
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${REF}" >/dev/null 2>&1 || true
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${REF}" -f sha="${MERGE_SHA}" >/dev/null
+
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "Branch efêmera ${REF} -> ${MERGE_SHA}"
+
+      - name: release-please (dry-run) sobre o merge simulado
         id: rp
+        if: steps.ephemeral.outputs.ref != ''
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIEW_REF: ${{ steps.ephemeral.outputs.ref }}
         run: |
           set +e
           npx --yes release-please@16 release-pr \
             --token="${GITHUB_TOKEN}" \
             --repo-url="${GITHUB_REPOSITORY}" \
-            --target-branch="refs/pull/${PR_NUMBER}/merge" \
+            --target-branch="${PREVIEW_REF}" \
             --config-file=release-please-config-rc.json \
             --manifest-file=.release-please-manifest-rc.json \
             --dry-run \
@@ -57,6 +107,16 @@ jobs:
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           echo "--- saída do release-please (dry-run) ---"
           cat rp-dryrun.log
+
+      - name: Remover branch efêmera
+        if: always() && steps.ephemeral.outputs.ref != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREVIEW_REF: ${{ steps.ephemeral.outputs.ref }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${PREVIEW_REF}" >/dev/null 2>&1 \
+            && echo "branch efêmera ${PREVIEW_REF} removida" \
+            || echo "branch efêmera ${PREVIEW_REF} já não existia"
 
       - name: Projetar versão e comentar no PR
         uses: actions/github-script@v7
