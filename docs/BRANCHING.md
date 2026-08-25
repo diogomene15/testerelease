@@ -178,3 +178,20 @@ PR mergeado que ficou sem tag.
 `develop → release` apaga a branch `develop` — a regra `deletion` do ruleset não
 impede, porque quem faz o merge normalmente tem bypass. As branches de feature
 são apagadas explicitamente com `gh pr merge --delete-branch`.
+
+### 6. Um run cancelado bloqueia o merge indefinidamente
+
+`concurrency.cancel-in-progress: true` é o padrão recomendado para economizar
+minutos de CI, mas num **status check obrigatório** ele cria um impasse: o run
+cancelado fica no rollup do PR como check não-bem-sucedido, e o merge segue
+`BLOCKED` mesmo depois de um run posterior passar.
+
+```
+checks: [ {name: "...", conclusion: CANCELLED},
+          {name: "...", conclusion: SUCCESS} ]
+mergeStateStatus: BLOCKED
+```
+
+Dois eventos próximos bastam para provocar — abrir o PR e aplicar a label, por
+exemplo. Por isso o guard de `develop` roda com `cancel-in-progress: false`. Se
+um PR já ficou travado assim, `gh run rerun <id>` no run cancelado o libera.
