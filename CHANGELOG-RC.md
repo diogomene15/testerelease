@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0-rc.1](https://github.com/diogomene15/testerelease/compare/v1.0.0-rc...v1.0.0-rc.1) (2026-08-25)
+
+
+### 🐛 Correções
+
+* **saudacao:** usa toLocaleUpperCase para respeitar o idioma ([#17](https://github.com/diogomene15/testerelease/issues/17)) ([847f075](https://github.com/diogomene15/testerelease/commit/847f075d2e667343cbaa44fdfc2127cf08ed2cb7))
+
 ## [1.0.0-rc](https://github.com/diogomene15/testerelease/compare/v0.1.0-rc...v1.0.0-rc) (2026-08-25)
 
 
