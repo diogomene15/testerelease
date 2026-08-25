@@ -14,14 +14,18 @@ const SAUDACOES = {
 
 const IDIOMA_PADRAO = 'pt';
 
-function greet(name = 'mundo', idioma = IDIOMA_PADRAO) {
+// A assinatura posicional não escalava para novas opções; passa a receber um
+// objeto de opções.
+function saudar(name = 'mundo', { idioma = IDIOMA_PADRAO, maiusculas = false } = {}) {
   // Um idioma desconhecido não deve derrubar a aplicação: cai no padrão.
   const saudacao = SAUDACOES[idioma] ?? SAUDACOES[IDIOMA_PADRAO];
-  return saudacao(name);
+  const texto = saudacao(name);
+  // toUpperCase() sem locale erra em alguns idiomas; toLocaleUpperCase respeita.
+  return maiusculas ? texto.toLocaleUpperCase(idioma) : texto;
 }
 
-module.exports = { greet, VERSION };
+module.exports = { saudar, VERSION };
 
 if (require.main === module) {
-  console.log(`${greet()} (v${VERSION})`);
+  console.log(`${saudar()} (v${VERSION})`);
 }

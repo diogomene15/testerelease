@@ -162,6 +162,20 @@ jobs:
             const impact = highestImpact(relevant);
             const projected = nextRc(lastStable, lastRc, impact);
 
+            let dryRun = '(dry-run não executado)';
+            try {
+              dryRun = fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/rp-dryrun.log`, 'utf8').trim() || '(vazio)';
+            } catch { /* o step do dry-run pode ter sido pulado */ }
+
+            // O release-please conta todos os commits desde a última release do
+            // track — não apenas os deste PR —, então a versão dele é a fonte da
+            // verdade. A projeção local só entra se o dry-run não produzir uma.
+            const computed = dryRun.match(/^title:.*?\bv(\d+\.\d+\.\d+[^\s]*)\s*$/m)?.[1] ?? null;
+            const version = computed ?? projected;
+            const origem = computed
+              ? 'calculada pelo `release-please`'
+              : '⚠️ projeção local — o dry-run não retornou versão';
+
             const IMPACT_LABEL = {
               major: '`MAJOR` — quebra de compatibilidade',
               minor: '`MINOR` — nova funcionalidade',
@@ -199,13 +213,14 @@ jobs:
               `| Última RC publicada | \`${lastRc === '0.0.0' ? '—' : 'v' + lastRc}\` |`,
               `| Última estável publicada | \`${lastStable === '0.0.0' ? '—' : 'v' + lastStable}\` |`,
               `| Impacto dos commits | ${IMPACT_LABEL[impact]} |`,
-              `| **Versão que será gerada** | **\`v${projected}\`** |`,
-              `| Estável correspondente | \`v${stableCore(projected)}\` (ao promover para \`main\`) |`,
+              `| **Versão que será gerada** | **\`v${version}\`** |`,
+              `| Origem do cálculo | ${origem} |`,
+              `| Estável correspondente | \`v${stableCore(version)}\` (ao promover para \`main\`) |`,
               `| Commits analisados | ${relevant.length} semânticos / ${parsed.length} totais |`,
               '',
             ];
 
-            if (impact === 'none') {
+            if (impact === 'none' && !computed) {
               lines.push(
                 '> ⚠️ Nenhum commit com impacto de versão (`feat`, `fix`, `perf`, breaking).',
                 '> O merge não vai gerar uma nova release candidate.',
@@ -232,13 +247,6 @@ jobs:
                 }
                 lines.push('');
               }
-            }
-
-            let dryRun = '';
-            try {
-              dryRun = fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/rp-dryrun.log`, 'utf8').trim();
-            } catch {
-              dryRun = '(sem saída)';
             }
 
             lines.push(
