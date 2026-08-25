@@ -36,20 +36,47 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
-      - name: release-please (dry-run) sobre o merge simulado do PR
+      # O release-please busca commits por branch via GraphQL e não enxerga
+      # `refs/pull/N/merge`. Publicar o merge simulado como uma branch efêmera
+      # é o que permite rodar o cálculo real sobre o resultado do merge.
+      - name: Publicar merge simulado como branch efêmera
+        id: ephemeral
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          REF="release-please-preview/pr-${PR_NUMBER}"
+
+          if [ -z "${MERGE_SHA}" ] || [ "${MERGE_SHA}" = "null" ]; then
+            echo "::warning::O GitHub ainda não calculou o merge commit deste PR (provável conflito). Dry-run pulado."
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${REF}" >/dev/null 2>&1 || true
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${REF}" -f sha="${MERGE_SHA}" >/dev/null
+
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "Branch efêmera ${REF} -> ${MERGE_SHA}"
+
+      - name: release-please (dry-run) sobre o merge simulado
         id: rp
+        if: steps.ephemeral.outputs.ref != ''
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIEW_REF: ${{ steps.ephemeral.outputs.ref }}
         run: |
           set +e
           npx --yes release-please@16 release-pr \
             --token="${GITHUB_TOKEN}" \
             --repo-url="${GITHUB_REPOSITORY}" \
-            --target-branch="refs/pull/${PR_NUMBER}/merge" \
+            --target-branch="${PREVIEW_REF}" \
             --config-file=release-please-config-rc.json \
             --manifest-file=.release-please-manifest-rc.json \
             --dry-run \
@@ -57,6 +84,16 @@ jobs:
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           echo "--- saída do release-please (dry-run) ---"
           cat rp-dryrun.log
+
+      - name: Remover branch efêmera
+        if: always() && steps.ephemeral.outputs.ref != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREVIEW_REF: ${{ steps.ephemeral.outputs.ref }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${PREVIEW_REF}" >/dev/null 2>&1 \
+            && echo "branch efêmera ${PREVIEW_REF} removida" \
+            || echo "branch efêmera ${PREVIEW_REF} já não existia"
 
       - name: Projetar versão e comentar no PR
         uses: actions/github-script@v7
