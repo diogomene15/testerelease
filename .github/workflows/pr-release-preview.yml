@@ -18,6 +18,9 @@ concurrency:
 
 jobs:
   preview:
+    # Os Release PRs abertos pelo próprio release-please têm esta mesma base;
+    # eles não vêm de `develop`/`release` e não devem passar pelo guard.
+    if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}
     name: release-please · cálculo da versão RC
     runs-on: ubuntu-latest
     steps:
