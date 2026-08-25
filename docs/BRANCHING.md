@@ -153,3 +153,28 @@ Contents API), mas a busca de commits é uma query GraphQL por branch:
 O workflow de preview contorna isso publicando o merge simulado como uma branch
 efêmera (`release-please-preview/pr-N`), rodando o dry-run contra ela e
 removendo-a no fim (`if: always()`).
+
+### 5. Um Release PR mergeado sem tag trava todos os próximos
+
+Se um Release PR é mergeado mas o `github-release` não chega a criar a tag, o PR
+fica com a label `autorelease: pending` para sempre. A partir daí o release-please
+recusa qualquer novo release na branch:
+
+```
+Found pull request #2: 'chore: release release'
+⚠ There are untagged, merged release PRs outstanding - aborting
+```
+
+E o pior: o workflow **termina verde**, porque para o release-please isso é um
+aviso, não um erro. Nada é publicado e nada falha.
+
+É a consequência natural da armadilha 2 — o `github-release` recusar o PR deixa
+exatamente esse estado. Para destravar, remova a label `autorelease: pending` do
+PR mergeado que ficou sem tag.
+
+## Interação com as configurações do repositório
+
+`delete_branch_on_merge` **precisa ficar desligado**. Com ele ativo, o merge de
+`develop → release` apaga a branch `develop` — a regra `deletion` do ruleset não
+impede, porque quem faz o merge normalmente tem bypass. As branches de feature
+são apagadas explicitamente com `gh pr merge --delete-branch`.
