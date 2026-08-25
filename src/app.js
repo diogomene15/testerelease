@@ -20,7 +20,8 @@ function saudar(name = 'mundo', { idioma = IDIOMA_PADRAO, maiusculas = false } =
   // Um idioma desconhecido não deve derrubar a aplicação: cai no padrão.
   const saudacao = SAUDACOES[idioma] ?? SAUDACOES[IDIOMA_PADRAO];
   const texto = saudacao(name);
-  return maiusculas ? texto.toUpperCase() : texto;
+  // toUpperCase() sem locale erra em alguns idiomas; toLocaleUpperCase respeita.
+  return maiusculas ? texto.toLocaleUpperCase(idioma) : texto;
 }
 
 module.exports = { saudar, VERSION };
