@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.0.0](https://github.com/diogomene15/testerelease/compare/v0.1.0...v1.0.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **saudacao:** `greet(name, idioma)` foi removido em favor de `saudar(name, { idioma, maiusculas })`.
+
+### ✨ Funcionalidades
+
+* **saudacao:** troca greet por saudar com objeto de opções ([#14](https://github.com/diogomene15/testerelease/issues/14)) ([b7e0206](https://github.com/diogomene15/testerelease/commit/b7e0206f706119141919316c838ab5b9cc308fc1))
+
+
+### 🐛 Correções
+
+* **saudacao:** usa toLocaleUpperCase para respeitar o idioma ([#17](https://github.com/diogomene15/testerelease/issues/17)) ([847f075](https://github.com/diogomene15/testerelease/commit/847f075d2e667343cbaa44fdfc2127cf08ed2cb7))
+
+
+### 🤖 CI/CD
+
+* **preview:** usa a versão calculada pelo release-please no comentário ([#13](https://github.com/diogomene15/testerelease/issues/13)) ([a35cf7e](https://github.com/diogomene15/testerelease/commit/a35cf7e3f66319ba893e89cfd65150877891bf75))
+
 ## [0.1.0](https://github.com/diogomene15/testerelease/compare/v0.0.0...v0.1.0) (2026-08-25)
 
 
