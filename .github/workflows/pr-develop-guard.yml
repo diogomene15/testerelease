@@ -14,7 +14,11 @@ permissions:
 
 concurrency:
   group: pr-develop-guard-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # Sem cancelamento: este é o status check obrigatório de `develop`, e um run
+  # cancelado permanece no rollup do PR como check não-bem-sucedido, bloqueando
+  # o merge mesmo depois de um run posterior passar. Dois eventos próximos
+  # (`opened` + `labeled`, por exemplo) bastam para cair nisso.
+  cancel-in-progress: false
 
 jobs:
   guard:
