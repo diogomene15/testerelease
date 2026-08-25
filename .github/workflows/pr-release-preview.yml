@@ -9,7 +9,9 @@ on:
     branches: [release]
 
 permissions:
-  contents: read
+  # `write` porque o preview publica (e remove) a branch efêmera com o merge
+  # simulado. PRs vindos de fork recebem token somente-leitura de qualquer forma.
+  contents: write
   pull-requests: write
 
 concurrency:
@@ -45,14 +47,35 @@ jobs:
         id: ephemeral
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           REF="release-please-preview/pr-${PR_NUMBER}"
 
-          if [ -z "${MERGE_SHA}" ] || [ "${MERGE_SHA}" = "null" ]; then
-            echo "::warning::O GitHub ainda não calculou o merge commit deste PR (provável conflito). Dry-run pulado."
+          # O GitHub calcula o merge commit de forma assíncrona: no evento
+          # `opened` o payload traz `merge_commit_sha: null`. É preciso esperar
+          # `mergeable` deixar de ser null para saber se há SHA ou conflito.
+          MERGE_SHA=""
+          for attempt in $(seq 1 20); do
+            PR_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+            MERGEABLE=$(jq -r '.mergeable' <<<"$PR_JSON")
+            CANDIDATE=$(jq -r '.merge_commit_sha // empty' <<<"$PR_JSON")
+
+            if [ "$MERGEABLE" = "true" ] && [ -n "$CANDIDATE" ]; then
+              MERGE_SHA="$CANDIDATE"
+              break
+            fi
+            if [ "$MERGEABLE" = "false" ]; then
+              echo "::warning::O PR tem conflitos com a branch alvo; não há merge simulado para analisar."
+              echo "ref=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "  aguardando o GitHub calcular o merge commit (tentativa ${attempt}, mergeable=${MERGEABLE})..."
+            sleep 3
+          done
+
+          if [ -z "${MERGE_SHA}" ]; then
+            echo "::warning::O GitHub não calculou o merge commit a tempo. Dry-run pulado; a projeção abaixo segue válida."
             echo "ref=" >> "$GITHUB_OUTPUT"
             exit 0
           fi

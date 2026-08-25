@@ -52,36 +52,60 @@ jobs:
           echo "version=$(jq -r '."."' "$MANIFEST")" >> "$GITHUB_OUTPUT"
 
       - name: release-please · abrir/atualizar Release PR
+        id: release_pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -o pipefail
           npx --yes release-please@16 release-pr \
             --token="${GITHUB_TOKEN}" \
             --repo-url="${GITHUB_REPOSITORY}" \
             --target-branch='${{ inputs.target-branch }}' \
             --config-file='${{ inputs.config-file }}' \
-            --manifest-file='${{ inputs.manifest-file }}'
+            --manifest-file='${{ inputs.manifest-file }}' \
+            2>&1 | tee release-pr.log
+
+          # Saber se houve trabalho evita esperar por um PR que não existe
+          # quando não há commits com impacto de versão.
+          if grep -q 'release-please--branches--' release-pr.log; then
+            echo "opened=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "opened=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Mergear o Release PR
         id: merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET: ${{ inputs.target-branch }}
+          OPENED: ${{ steps.release_pr.outputs.opened }}
         run: |
           set -euo pipefail
 
-          # O release-please abre o PR a partir de `release-please--branches--<alvo>`.
-          PR=$(gh pr list \
-                --base "$TARGET" \
-                --state open \
-                --label "autorelease: pending" \
-                --json number,title,headRefName \
-                --jq '.[0].number // empty')
-
-          if [ -z "$PR" ]; then
-            echo "Nenhum Release PR pendente — nada a publicar nesta execução."
+          if [ "${OPENED}" != "true" ]; then
+            echo "O release-please não abriu Release PR — nada a publicar nesta execução."
             echo "merged=false" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # O PR acabou de ser criado; a label `autorelease: pending` pode levar
+          # alguns segundos para ficar visível na listagem.
+          PR=""
+          for attempt in $(seq 1 15); do
+            PR=$(gh pr list \
+                  --base "$TARGET" \
+                  --state open \
+                  --label "autorelease: pending" \
+                  --json number \
+                  --jq '.[0].number // empty')
+            [ -n "$PR" ] && break
+            echo "  aguardando o Release PR aparecer na listagem (tentativa ${attempt})..."
+            sleep 3
+          done
+
+          if [ -z "$PR" ]; then
+            echo "::error::O release-please abriu um Release PR, mas ele não apareceu na listagem."
+            exit 1
           fi
 
           TITLE=$(gh pr view "$PR" --json title --jq .title)
