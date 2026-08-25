@@ -12,9 +12,11 @@ const SAUDACOES = {
   es: (name) => `¡Hola, ${name}!`,
 };
 
-function greet(name = 'mundo', idioma = 'pt') {
-  const saudacao = SAUDACOES[idioma];
-  if (!saudacao) throw new Error(`Idioma não suportado: ${idioma}`);
+const IDIOMA_PADRAO = 'pt';
+
+function greet(name = 'mundo', idioma = IDIOMA_PADRAO) {
+  // Um idioma desconhecido não deve derrubar a aplicação: cai no padrão.
+  const saudacao = SAUDACOES[idioma] ?? SAUDACOES[IDIOMA_PADRAO];
   return saudacao(name);
 }
 
