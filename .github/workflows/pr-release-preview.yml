@@ -131,18 +131,22 @@ jobs:
 
             const pr = context.payload.pull_request;
 
-            // Estado das versões conforme registrado na branch alvo (`release`).
-            const readManifest = (file) => {
+            const readManifest = (ref, file) => {
               try {
-                const raw = execFileSync('git', ['show', `origin/${pr.base.ref}:${file}`], { encoding: 'utf8' });
+                const raw = execFileSync('git', ['show', `origin/${ref}:${file}`], { encoding: 'utf8' });
                 return JSON.parse(raw)['.'];
               } catch {
                 return null;
               }
             };
 
-            const lastRc = readManifest('.release-please-manifest-rc.json') || '0.0.0';
-            const lastStable = readManifest('.release-please-manifest.json') || '0.0.0';
+            // Cada track guarda seu estado na branch onde publica: o RC em
+            // `release`, o estável na branch default. Ler o manifesto estável a
+            // partir de `release` sempre devolveria 0.0.0, porque os commits de
+            // release da branch default nunca chegam à staging.
+            const defaultBranch = context.payload.repository.default_branch;
+            const lastRc = readManifest(pr.base.ref, '.release-please-manifest-rc.json') || '0.0.0';
+            const lastStable = readManifest(defaultBranch, '.release-please-manifest.json') || '0.0.0';
 
             const rawCommits = await github.paginate(github.rest.pulls.listCommits, {
               owner: context.repo.owner,
