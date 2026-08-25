@@ -1,0 +1,27 @@
+name: Release Candidate · release
+
+# Disparado quando `develop` é mergeado em `release` (a branch de staging, que
+# nunca é excluída). Publica uma versão `-rc` marcada como pre-release.
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-candidate
+  cancel-in-progress: false
+
+jobs:
+  rc:
+    uses: ./.github/workflows/release-please-run.yml
+    with:
+      target-branch: release
+      config-file: release-please-config-rc.json
+      manifest-file: .release-please-manifest-rc.json
+      channel: rc
+    secrets: inherit

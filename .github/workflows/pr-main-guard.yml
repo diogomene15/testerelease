@@ -1,0 +1,118 @@
+name: Guard · release → main
+
+# `main` só recebe código que já passou pela homologação em `release`.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-main-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Origem e versão a promover
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exigir que a origem seja release
+        if: github.event.pull_request.head.ref != 'release'
+        run: |
+          echo "::error::Só a branch 'release' pode abrir PR para 'main'. Origem recebida: '${{ github.event.pull_request.head.ref }}'."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Comentar versão que será promovida
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execFileSync } = require('child_process');
+            const { parseConventional, highestImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
+            const { bumpStable, stableCore } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
+
+            const pr = context.payload.pull_request;
+
+            const readManifest = (ref, file) => {
+              try {
+                return JSON.parse(execFileSync('git', ['show', `origin/${ref}:${file}`], { encoding: 'utf8' }))['.'];
+              } catch {
+                return null;
+              }
+            };
+
+            const lastStable = readManifest(pr.base.ref, '.release-please-manifest.json') || '0.0.0';
+            const currentRc = readManifest(pr.head.ref, '.release-please-manifest-rc.json') || '0.0.0';
+
+            const rawCommits = await github.paginate(github.rest.pulls.listCommits, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              pull_number: pr.number, per_page: 100,
+            });
+
+            const parsed = rawCommits
+              .map((c) => parseConventional(c.commit.message, ''))
+              .filter((p) => p.valid);
+
+            const impact = highestImpact(parsed);
+            const projected = bumpStable(lastStable, impact);
+
+            const IMPACT_LABEL = {
+              major: '`MAJOR` — quebra de compatibilidade',
+              minor: '`MINOR` — nova funcionalidade',
+              patch: '`PATCH` — correção',
+              none: 'nenhum bump (só manutenção)',
+            };
+
+            const lines = [
+              '<!-- pr-main-guard -->',
+              '## 🚀 Promoção para produção',
+              '',
+              '| | |',
+              '| --- | --- |',
+              `| Origem | \`${pr.head.ref}\` (staging) |`,
+              `| RC homologada | \`${currentRc === '0.0.0' ? '—' : 'v' + currentRc}\` |`,
+              `| Última estável | \`${lastStable === '0.0.0' ? '—' : 'v' + lastStable}\` |`,
+              `| Impacto dos commits | ${IMPACT_LABEL[impact]} |`,
+              `| **Versão estável a publicar** | **\`v${projected}\`** |`,
+              '',
+            ];
+
+            if (currentRc !== '0.0.0' && stableCore(currentRc) !== projected) {
+              lines.push(
+                `> ⚠️ A RC homologada (\`v${currentRc}\`) aponta para \`v${stableCore(currentRc)}\`, `,
+                `> mas a promoção calculou \`v${projected}\`. Confira se \`release\` está em dia com \`main\`.`,
+                ''
+              );
+            }
+
+            lines.push(
+              'Ao mergear (**merge commit**), o workflow `Release Estável` publica a tag `v' + projected + '`,',
+              'atualiza o `CHANGELOG.md` e cria a release no GitHub com as release notes.'
+            );
+
+            const body = lines.join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: pr.number, per_page: 100,
+            });
+            const previous = comments.find((c) => c.body?.includes('<!-- pr-main-guard -->'));
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: previous.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pr.number, body,
+              });
+            }
+
+            await core.summary.addRaw(body.replace('<!-- pr-main-guard -->', '')).write();

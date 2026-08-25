@@ -1,0 +1,128 @@
+name: Guard · feature → develop
+
+# Porta de entrada do fluxo: nada entra em `develop` sem label de mudança e sem
+# Conventional Commits. Como o merge em `develop` é squash, o título do PR vira
+# a mensagem de commit — por isso ele também é validado.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    branches: [develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-develop-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Conventional Commits + label obrigatória
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Testes do validador
+        run: node --test .github/scripts/validate-pr.test.js
+
+      - name: Validar PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { validate } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
+            const pr = context.payload.pull_request;
+
+            const rawCommits = await github.paginate(github.rest.pulls.listCommits, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const result = validate({
+              prTitle: pr.title,
+              prBody: pr.body || '',
+              commits: rawCommits.map((c) => ({ sha: c.sha, message: c.commit.message })),
+              labels: pr.labels.map((l) => l.name),
+              headRef: pr.head.ref,
+            });
+
+            const IMPACT_LABEL = {
+              major: '`MAJOR` — quebra compatibilidade',
+              minor: '`MINOR` — nova funcionalidade',
+              patch: '`PATCH` — correção',
+              none: 'nenhum bump de versão',
+            };
+
+            const lines = [
+              '<!-- pr-develop-guard -->',
+              result.ok
+                ? '## ✅ PR liberado para `develop`'
+                : '## ❌ PR bloqueado para `develop`',
+              '',
+              '| Item | Valor |',
+              '| --- | --- |',
+              `| Branch de origem | \`${pr.head.ref}\` |`,
+              `| Label de mudança | ${result.changeLabel ? `\`${result.changeLabel}\`` : '_ausente_'} |`,
+              `| Commits analisados | ${result.validCommitCount}/${result.commitCount} válidos |`,
+              `| Impacto detectado | ${IMPACT_LABEL[result.actualImpact]} |`,
+              `| Método de merge | \`squash\` (obrigatório nesta branch) |`,
+              '',
+            ];
+
+            if (result.errors.length > 0) {
+              lines.push('### Pendências obrigatórias', '');
+              result.errors.forEach((e, i) => lines.push(`${i + 1}. ${e}`));
+              lines.push('');
+            }
+
+            if (result.warnings.length > 0) {
+              lines.push('### Avisos', '');
+              result.warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
+              lines.push('');
+            }
+
+            if (result.ok) {
+              lines.push(
+                'Ao mergear (squash), o commit gerado em `develop` será:',
+                '',
+                '```',
+                pr.title,
+                '```',
+                '',
+                'Esse commit é o que o `release-please` vai ler para calcular a versão em `release` e `main`.'
+              );
+            }
+
+            const body = lines.join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              per_page: 100,
+            });
+            const previous = comments.find((c) => c.body?.includes('<!-- pr-develop-guard -->'));
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body,
+              });
+            }
+
+            await core.summary.addRaw(body.replace('<!-- pr-develop-guard -->', '')).write();
+
+            if (!result.ok) {
+              core.setFailed(`PR bloqueado: ${result.errors.length} pendência(s) obrigatória(s).`);
+            }

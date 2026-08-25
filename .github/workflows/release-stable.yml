@@ -1,0 +1,27 @@
+name: Release Estável · main
+
+# Disparado quando `release` é mergeado em `main`. Publica a versão estável,
+# com CHANGELOG.md e release notes no GitHub.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-stable
+  cancel-in-progress: false
+
+jobs:
+  stable:
+    uses: ./.github/workflows/release-please-run.yml
+    with:
+      target-branch: main
+      config-file: release-please-config.json
+      manifest-file: .release-please-manifest.json
+      channel: stable
+    secrets: inherit

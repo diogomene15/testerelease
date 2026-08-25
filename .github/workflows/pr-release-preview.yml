@@ -1,0 +1,218 @@
+name: Preview · develop → release
+
+# Quando abre um PR de `develop` para `release`, o release-please entra em ação
+# em modo dry-run e calcula qual release candidate sairá do merge. O resultado
+# vira um comentário no PR e um status check.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [release]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-release-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: release-please · cálculo da versão RC
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exigir que a origem seja develop
+        if: github.event.pull_request.head.ref != 'develop'
+        run: |
+          echo "::error::Só a branch 'develop' pode abrir PR para 'release'. Origem recebida: '${{ github.event.pull_request.head.ref }}'."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: release-please (dry-run) sobre o merge simulado do PR
+        id: rp
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          npx --yes release-please@16 release-pr \
+            --token="${GITHUB_TOKEN}" \
+            --repo-url="${GITHUB_REPOSITORY}" \
+            --target-branch="refs/pull/${PR_NUMBER}/merge" \
+            --config-file=release-please-config-rc.json \
+            --manifest-file=.release-please-manifest-rc.json \
+            --dry-run \
+            > rp-dryrun.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "--- saída do release-please (dry-run) ---"
+          cat rp-dryrun.log
+
+      - name: Projetar versão e comentar no PR
+        uses: actions/github-script@v7
+        env:
+          RP_EXIT_CODE: ${{ steps.rp.outputs.exit_code }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { execFileSync } = require('child_process');
+            const { parseConventional, highestImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
+            const { nextRc, stableCore } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
+
+            const pr = context.payload.pull_request;
+
+            // Estado das versões conforme registrado na branch alvo (`release`).
+            const readManifest = (file) => {
+              try {
+                const raw = execFileSync('git', ['show', `origin/${pr.base.ref}:${file}`], { encoding: 'utf8' });
+                return JSON.parse(raw)['.'];
+              } catch {
+                return null;
+              }
+            };
+
+            const lastRc = readManifest('.release-please-manifest-rc.json') || '0.0.0';
+            const lastStable = readManifest('.release-please-manifest.json') || '0.0.0';
+
+            const rawCommits = await github.paginate(github.rest.pulls.listCommits, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const parsed = rawCommits.map((c) => {
+              const p = parseConventional(c.commit.message, '');
+              p.sha = c.sha;
+              return p;
+            });
+
+            const relevant = parsed.filter((p) => p.valid);
+            const invalid = parsed.filter((p) => !p.valid);
+            const impact = highestImpact(relevant);
+            const projected = nextRc(lastStable, lastRc, impact);
+
+            const IMPACT_LABEL = {
+              major: '`MAJOR` — quebra de compatibilidade',
+              minor: '`MINOR` — nova funcionalidade',
+              patch: '`PATCH` — correção',
+              none: 'nenhum bump (só manutenção)',
+            };
+
+            const SECTION = {
+              feat: '✨ Funcionalidades',
+              fix: '🐛 Correções',
+              perf: '⚡ Performance',
+              revert: '⏪ Revertidos',
+              refactor: '♻️ Refatorações',
+              docs: '📚 Documentação',
+              build: '📦 Build',
+              ci: '🤖 CI/CD',
+            };
+
+            const grouped = new Map();
+            for (const c of relevant) {
+              const section = SECTION[c.type];
+              if (!section) continue;
+              if (!grouped.has(section)) grouped.set(section, []);
+              grouped.get(section).push(c);
+            }
+
+            const lines = [
+              '<!-- pr-release-preview -->',
+              '## 🧪 Prévia da Release Candidate',
+              '',
+              'O `release-please` analisou os commits semânticos que entrarão em `release`.',
+              '',
+              '| | |',
+              '| --- | --- |',
+              `| Última RC publicada | \`${lastRc === '0.0.0' ? '—' : 'v' + lastRc}\` |`,
+              `| Última estável publicada | \`${lastStable === '0.0.0' ? '—' : 'v' + lastStable}\` |`,
+              `| Impacto dos commits | ${IMPACT_LABEL[impact]} |`,
+              `| **Versão que será gerada** | **\`v${projected}\`** |`,
+              `| Estável correspondente | \`v${stableCore(projected)}\` (ao promover para \`main\`) |`,
+              `| Commits analisados | ${relevant.length} semânticos / ${parsed.length} totais |`,
+              '',
+            ];
+
+            if (impact === 'none') {
+              lines.push(
+                '> ⚠️ Nenhum commit com impacto de versão (`feat`, `fix`, `perf`, breaking).',
+                '> O merge não vai gerar uma nova release candidate.',
+                ''
+              );
+            }
+
+            if (invalid.length > 0) {
+              lines.push(
+                `> ⚠️ ${invalid.length} commit(s) sem formato Conventional Commits foram ignorados no cálculo:`,
+                ...invalid.map((c) => `> - \`${c.sha.slice(0, 7)}\` ${c.subject}`),
+                ''
+              );
+            }
+
+            if (grouped.size > 0) {
+              lines.push('### Changelog previsto', '');
+              for (const [section, items] of grouped) {
+                lines.push(`#### ${section}`, '');
+                for (const c of items) {
+                  const scope = c.scope ? `**${c.scope}:** ` : '';
+                  const bang = c.breaking ? ' ⚠️ **BREAKING**' : '';
+                  lines.push(`- ${scope}${c.description}${bang} (\`${c.sha.slice(0, 7)}\`)`);
+                }
+                lines.push('');
+              }
+            }
+
+            let dryRun = '';
+            try {
+              dryRun = fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/rp-dryrun.log`, 'utf8').trim();
+            } catch {
+              dryRun = '(sem saída)';
+            }
+
+            lines.push(
+              '<details><summary>Saída bruta do <code>release-please --dry-run</code></summary>',
+              '',
+              '```',
+              dryRun.slice(0, 8000) || '(vazio)',
+              '```',
+              '',
+              '</details>',
+              '',
+              '---',
+              '',
+              'Ao mergear este PR (**merge commit**, para preservar os commits semânticos), o workflow',
+              '`Release Candidate` publica a tag e o pre-release no GitHub.'
+            );
+
+            const body = lines.join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              per_page: 100,
+            });
+            const previous = comments.find((c) => c.body?.includes('<!-- pr-release-preview -->'));
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: previous.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pr.number, body,
+              });
+            }
+
+            await core.summary.addRaw(body.replace('<!-- pr-release-preview -->', '')).write();

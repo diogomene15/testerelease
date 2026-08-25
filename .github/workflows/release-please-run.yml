@@ -1,0 +1,154 @@
+name: release-please (reutilizável)
+
+# Executa o ciclo completo do release-please em uma branch alvo:
+#   1. `release-pr`      — calcula a versão pelos commits semânticos, atualiza
+#                          changelog/manifesto e abre o Release PR;
+#   2. merge automático  — para que o merge que disparou o workflow já resulte
+#                          em uma versão publicada, sem passo manual extra;
+#   3. `github-release`  — cria a tag e a release no GitHub com as release notes.
+on:
+  workflow_call:
+    inputs:
+      target-branch:
+        description: Branch em que a versão será publicada.
+        required: true
+        type: string
+      config-file:
+        description: Config do release-please a usar.
+        required: true
+        type: string
+      manifest-file:
+        description: Manifesto de versões a usar.
+        required: true
+        type: string
+      channel:
+        description: '`rc` (pre-release) ou `stable`.'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release:
+    name: Publicar versão (${{ inputs.channel }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target-branch }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Versão registrada antes da execução
+        id: before
+        run: |
+          MANIFEST='${{ inputs.manifest-file }}'
+          echo "version=$(jq -r '."."' "$MANIFEST")" >> "$GITHUB_OUTPUT"
+
+      - name: release-please · abrir/atualizar Release PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes release-please@16 release-pr \
+            --token="${GITHUB_TOKEN}" \
+            --repo-url="${GITHUB_REPOSITORY}" \
+            --target-branch='${{ inputs.target-branch }}' \
+            --config-file='${{ inputs.config-file }}' \
+            --manifest-file='${{ inputs.manifest-file }}'
+
+      - name: Mergear o Release PR
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ inputs.target-branch }}
+        run: |
+          set -euo pipefail
+
+          # O release-please abre o PR a partir de `release-please--branches--<alvo>`.
+          PR=$(gh pr list \
+                --base "$TARGET" \
+                --state open \
+                --label "autorelease: pending" \
+                --json number,title,headRefName \
+                --jq '.[0].number // empty')
+
+          if [ -z "$PR" ]; then
+            echo "Nenhum Release PR pendente — nada a publicar nesta execução."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TITLE=$(gh pr view "$PR" --json title --jq .title)
+          echo "Release PR #$PR encontrado: $TITLE"
+
+          # Merge commit preserva os commits semânticos originais na branch alvo.
+          gh pr merge "$PR" --merge --delete-branch
+
+          # O merge é assíncrono; o `github-release` depende dele já estar aplicado.
+          for i in $(seq 1 30); do
+            STATE=$(gh pr view "$PR" --json state --jq .state)
+            [ "$STATE" = "MERGED" ] && break
+            echo "  aguardando merge do PR #$PR (tentativa $i, estado=$STATE)..."
+            sleep 2
+          done
+
+          STATE=$(gh pr view "$PR" --json state --jq .state)
+          if [ "$STATE" != "MERGED" ]; then
+            echo "::error::O Release PR #$PR não foi mergeado (estado=$STATE)."
+            exit 1
+          fi
+
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+
+      - name: release-please · criar tag e release no GitHub
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes release-please@16 github-release \
+            --token="${GITHUB_TOKEN}" \
+            --repo-url="${GITHUB_REPOSITORY}" \
+            --target-branch='${{ inputs.target-branch }}' \
+            --config-file='${{ inputs.config-file }}' \
+            --manifest-file='${{ inputs.manifest-file }}'
+
+      - name: Resumo
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ inputs.target-branch }}
+          CHANNEL: ${{ inputs.channel }}
+          BEFORE: ${{ steps.before.outputs.version }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+        run: |
+          set -euo pipefail
+
+          AFTER=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${{ inputs.manifest-file }}?ref=${TARGET}" \
+                    --jq '.content' | base64 -d | jq -r '."."')
+
+          {
+            echo "## Publicação em \`${TARGET}\` (canal \`${CHANNEL}\`)"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Versão anterior | \`${BEFORE}\` |"
+            echo "| Versão atual | \`${AFTER}\` |"
+            echo "| Release PR mergeado | \`${MERGED:-false}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${MERGED:-false}" = "true" ]; then
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "### Releases mais recentes" >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            gh release list --limit 5 \
+              --json tagName,isPrerelease,createdAt \
+              --jq '.[] | "- `\(.tagName)`" + (if .isPrerelease then " — pre-release" else " — **estável**" end)' \
+              >> "$GITHUB_STEP_SUMMARY" || true
+          fi
