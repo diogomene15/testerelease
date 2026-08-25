@@ -9,7 +9,9 @@ on:
     branches: [release]
 
 permissions:
-  contents: read
+  # `write` porque o preview publica (e remove) a branch efêmera com o merge
+  # simulado. PRs vindos de fork recebem token somente-leitura de qualquer forma.
+  contents: write
   pull-requests: write
 
 concurrency:
