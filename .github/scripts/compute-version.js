@@ -1,15 +1,29 @@
 'use strict';
 
 /**
- * Projeção de versão para o preview do PR `develop -> release`.
+ * Cálculo de versões do fluxo.
  *
- * Replica as regras que o release-please aplica nos workflows de push, para
- * conseguir responder "que versão sai se eu mergear este PR?" ANTES do merge —
- * momento em que o release-please ainda não enxerga esses commits na branch
- * alvo. A fonte da verdade continua sendo o release-please; isto é a projeção.
+ * Duas funções distintas moram aqui:
+ *
+ *  - **projeção** (`bumpStable`, `nextRc`): replica as regras que o
+ *    release-please aplica nos workflows de push, para responder "que versão sai
+ *    se eu mergear este PR?" ANTES do merge — momento em que o release-please
+ *    ainda não enxerga esses commits na branch alvo. Aqui a fonte da verdade
+ *    continua sendo o release-please; isto é só a projeção.
+ *
+ *  - **decisão** (`nextHotfix`, `nextRcForHotfix`): as versões de hotfix não são
+ *    deriváveis de nenhuma estratégia do release-please, então são calculadas
+ *    aqui e impostas a ele via `--release-as`. Nesses casos isto *é* a fonte da
+ *    verdade. Ver `hotfix.js` e `docs/HOTFIX.md`.
  */
 
 const SEMVER_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/** Rótulo de prerelease do track de staging (`release`). */
+const RC_PRERELEASE = 'rc';
+
+/** Rótulo de prerelease dos hotfixes publicados em produção (`main`). */
+const HOTFIX_PRERELEASE = 'hf';
 
 function parseVersion(version) {
   const match = String(version ?? '').trim().match(SEMVER_RE);
@@ -28,10 +42,45 @@ function formatVersion({ major, minor, patch, prerelease }) {
   return prerelease ? `${core}-${prerelease}` : core;
 }
 
+/**
+ * Quebra o identificador de prerelease em rótulo e contador.
+ *
+ *   `rc.3` -> { label: 'rc', counter: 3 }
+ *   `hf`   -> { label: 'hf', counter: null }
+ */
+function parsePrerelease(prerelease) {
+  if (!prerelease) return null;
+  const parts = String(prerelease).split('.');
+  const last = parts[parts.length - 1];
+  return {
+    label: parts[0],
+    counter: parts.length > 1 && /^\d+$/.test(last) ? Number(last) : null,
+  };
+}
+
 /** Núcleo `X.Y.Z` da versão, descartando qualquer sufixo de prerelease. */
 function stableCore(version) {
   const { major, minor, patch } = parseVersion(version);
   return `${major}.${minor}.${patch}`;
+}
+
+/** A versão é um hotfix de produção (`X.Y.Z-hf`, `X.Y.Z-hf.N`)? */
+function isHotfixVersion(version) {
+  const { prerelease } = parseVersion(version);
+  return parsePrerelease(prerelease)?.label === HOTFIX_PRERELEASE;
+}
+
+/**
+ * O núcleo `X.Y.Z` desta versão já foi publicado como estável?
+ *
+ * Distingue os dois sufixos do fluxo, que apontam para lados opostos da mesma
+ * versão: `1.2.0-rc.3` é **pré**-lançamento (o núcleo 1.2.0 ainda não saiu),
+ * enquanto `1.2.0-hf` é **pós**-lançamento (corrige o 1.2.0 que já está em
+ * produção). Do primeiro se gradua para 1.2.0; do segundo só se avança.
+ */
+function coreAlreadyReleased(prerelease) {
+  if (prerelease === null) return true;
+  return parsePrerelease(prerelease).label === HOTFIX_PRERELEASE;
 }
 
 /**
@@ -40,10 +89,15 @@ function stableCore(version) {
  */
 function bumpStable(currentVersion, impact, { bumpMinorPreMajor = false } = {}) {
   const { major, minor, patch, prerelease } = parseVersion(currentVersion);
+  const core = `${major}.${minor}.${patch}`;
+  const released = coreAlreadyReleased(prerelease);
 
-  // Uma versão prerelease "gradua" para o próprio núcleo quando não há nada
-  // além dela: 1.2.0-rc.3 -> 1.2.0.
-  if (prerelease && impact === 'none') return `${major}.${minor}.${patch}`;
+  if (impact === 'none') {
+    // Uma versão de prerelease "gradua" para o próprio núcleo quando não há
+    // nada além dela: 1.2.0-rc.3 -> 1.2.0. Um `-hf` não gradua: seu núcleo já
+    // saiu, então sem commits não há próxima versão nenhuma.
+    return released ? formatVersion({ major, minor, patch, prerelease }) : core;
+  }
 
   const preMajor = major === 0;
 
@@ -55,12 +109,9 @@ function bumpStable(currentVersion, impact, { bumpMinorPreMajor = false } = {}) 
     case 'minor':
       return `${major}.${minor + 1}.0`;
     case 'patch':
-      return prerelease
-        ? `${major}.${minor}.${patch}`
-        : `${major}.${minor}.${patch + 1}`;
-    case 'none':
+      return released ? `${major}.${minor}.${patch + 1}` : core;
     default:
-      return `${major}.${minor}.${patch}`;
+      return core;
   }
 }
 
@@ -72,17 +123,64 @@ function bumpStable(currentVersion, impact, { bumpMinorPreMajor = false } = {}) 
  * RC atual já aponta para esse mesmo alvo, apenas o contador `rc.N` avança.
  */
 function nextRc(lastStable, currentRc, impact, options = {}) {
-  const target = bumpStable(lastStable, impact, options);
+  let target = bumpStable(lastStable, impact, options);
 
   if (currentRc) {
+    // Cada hotfix retroportado eleva o núcleo do track RC sem mexer no núcleo da
+    // estável (que fica em `-hf`). Depois de dois deles, um `fix:` normal
+    // calcularia um alvo *abaixo* do que a RC já publicou — o alvo nunca pode
+    // regredir para trás do track.
+    const rcCore = stableCore(currentRc);
+    if (compareVersions(rcCore, target) > 0) target = rcCore;
+
     const { prerelease } = parseVersion(currentRc);
-    if (prerelease && stableCore(currentRc) === target) {
-      const counter = Number(prerelease.match(/(\d+)\s*$/)?.[1] ?? 0);
-      return `${target}-rc.${counter + 1}`;
+    if (prerelease && rcCore === target) {
+      const counter = parsePrerelease(prerelease).counter ?? 0;
+      return `${target}-${RC_PRERELEASE}.${counter + 1}`;
     }
   }
 
-  return `${target}-rc.1`;
+  return `${target}-${RC_PRERELEASE}.1`;
+}
+
+/**
+ * Versão de um hotfix publicado em `main`.
+ *
+ * O núcleo `X.Y.Z` é **preservado**: a correção é publicada sobre a estável que
+ * já está em produção, sinalizada pelo sufixo `-hf`. Hotfixes seguintes sobre a
+ * mesma estável apenas avançam o contador.
+ *
+ *   1.0.2      -> 1.0.2-hf
+ *   1.0.2-hf   -> 1.0.2-hf.2
+ *   1.0.2-hf.2 -> 1.0.2-hf.3
+ */
+function nextHotfix(currentStable) {
+  const { major, minor, patch, prerelease } = parseVersion(currentStable);
+  const core = `${major}.${minor}.${patch}`;
+  const pre = parsePrerelease(prerelease);
+
+  if (!pre || pre.label !== HOTFIX_PRERELEASE) {
+    return `${core}-${HOTFIX_PRERELEASE}`;
+  }
+
+  // `-hf` (sem contador) é o primeiro; o próximo é `-hf.2`, e não `-hf.1`, que
+  // seria menor que ele na precedência semver.
+  return `${core}-${HOTFIX_PRERELEASE}.${(pre.counter ?? 1) + 1}`;
+}
+
+/**
+ * Versão do track RC depois que um hotfix é retroportado para `release`.
+ *
+ * Aqui o núcleo **avança** um PATCH: a RC atual aponta para uma estável que o
+ * hotfix já corrigiu em produção, então a próxima estável tem de ser maior. O
+ * contador de RC reinicia porque o ciclo passou a mirar outro núcleo.
+ *
+ *   1.0.1-rc.3 -> 1.0.2-rc.1
+ *   1.0.2-rc.1 -> 1.0.3-rc.1
+ */
+function nextRcForHotfix(currentRc) {
+  const { major, minor, patch } = parseVersion(currentRc);
+  return `${major}.${minor}.${patch + 1}-${RC_PRERELEASE}.1`;
 }
 
 /** Compara duas versões semver (ignora metadados de build). */
@@ -103,8 +201,14 @@ function compareVersions(a, b) {
 module.exports = {
   parseVersion,
   formatVersion,
+  parsePrerelease,
   stableCore,
+  isHotfixVersion,
   bumpStable,
   nextRc,
+  nextHotfix,
+  nextRcForHotfix,
   compareVersions,
+  RC_PRERELEASE,
+  HOTFIX_PRERELEASE,
 };

@@ -11,7 +11,14 @@
  *  3. Todos os commits do PR precisam ser Conventional Commits.
  *  4. A label declarada precisa ser coerente com o impacto real dos commits.
  *  5. A branch de origem precisa seguir a convenção de nomes do fluxo.
+ *
+ * O back-merge de um `hotfix/*` em `develop` inverte a regra 4: em vez de exigir
+ * que a label acompanhe os commits, exige que título e label sejam **neutros** —
+ * a correção já foi versionada em `main` e em `release`, e o commit squashado
+ * geraria um terceiro bump. Ver `docs/HOTFIX.md`.
  */
+
+const { isHotfixBranch } = require('./hotfix.js');
 
 const COMMIT_TYPES = [
   'feat', 'fix', 'docs', 'style', 'refactor',
@@ -83,9 +90,13 @@ function highestImpact(parsedCommits) {
   );
 }
 
-function validate({ prTitle, prBody, commits = [], labels = [], headRef = '' }) {
+function validate({ prTitle, prBody, commits = [], labels = [], headRef = '', baseRef = 'develop' }) {
   const errors = [];
   const warnings = [];
+
+  // O back-merge de um hotfix em `develop` chega aqui pelo mesmo guard, mas
+  // troca a regra de coerência por uma exigência de neutralidade.
+  const hotfixBackmerge = baseRef === 'develop' && isHotfixBranch(headRef);
 
   // ---------------------------------------------------------------- 1. label
   const changeLabels = labels.filter((l) => Object.hasOwn(CHANGE_LABELS, l));
@@ -135,11 +146,33 @@ function validate({ prTitle, prBody, commits = [], labels = [], headRef = '' }) 
   }
 
   // ------------------------------------------------- 4. coerência label/commits
-  const actualImpact = highestImpact(
-    parsedTitle.valid ? [...parsedCommits, parsedTitle] : parsedCommits
-  );
+  // No squash só o título sobrevive; num back-merge de hotfix os `fix:` de
+  // dentro do PR são descartados de propósito, então o impacto que vale é o do
+  // título — e ele tem de ser nenhum.
+  const actualImpact = hotfixBackmerge
+    ? (parsedTitle.valid ? parsedTitle.impact : 'none')
+    : highestImpact(parsedTitle.valid ? [...parsedCommits, parsedTitle] : parsedCommits);
 
-  if (declaredImpact && parsedCommits.length > 0 && invalidCommits.length === 0) {
+  if (hotfixBackmerge) {
+    // A versão do hotfix já foi publicada em `main` (`-hf`) e o ciclo já foi
+    // reposicionado em `release` (PATCH). Um `fix:` squashado aqui viraria um
+    // terceiro bump quando `develop` voltasse para `release`.
+    if (parsedTitle.valid && parsedTitle.impact !== 'none') {
+      errors.push(
+        `O título \`${parsedTitle.subject}\` declara impacto **${parsedTitle.impact}**, mas o ` +
+        'back-merge de um hotfix em `develop` não pode gerar versão — a correção já foi ' +
+        'versionada em `main` e em `release`.\n' +
+        '   Use um tipo neutro, por exemplo: `chore(hotfix): retroporta <correção> para develop`.'
+      );
+    }
+
+    if (declaredImpact && declaredImpact !== 'none') {
+      errors.push(
+        `A label \`${changeLabels[0]}\` declara impacto **${declaredImpact}**. Um back-merge de ` +
+        'hotfix precisa da label `changes: chore` — ele não muda a versão de `develop`.'
+      );
+    }
+  } else if (declaredImpact && parsedCommits.length > 0 && invalidCommits.length === 0) {
     if (IMPACT_RANK[declaredImpact] < IMPACT_RANK[actualImpact]) {
       errors.push(
         `A label \`${changeLabels[0]}\` declara impacto **${declaredImpact}**, mas os commits ` +
@@ -167,6 +200,7 @@ function validate({ prTitle, prBody, commits = [], labels = [], headRef = '' }) 
     warnings,
     declaredImpact,
     actualImpact,
+    hotfixBackmerge,
     changeLabel: changeLabels[0] ?? null,
     parsedTitle,
     commitCount: commits.length,
