@@ -61,6 +61,19 @@ const TYPE_IMPACT = {
 
 const IMPACT_RANK = { none: 0, patch: 1, minor: 2, major: 3 };
 
+/**
+ * Tipos que o release-please publica: os que têm seção **visível** no changelog
+ * das configs deste repositório. `test`, `style` e `chore` estão marcados como
+ * `hidden` e por isso não geram release sozinhos.
+ *
+ * É um conceito diferente de `TYPE_IMPACT`, que responde "quanto esta entrega
+ * move a versão" e governa a política de labels. Um `ci:` não move a versão
+ * semanticamente — mas o release-please publica um PATCH por ele.
+ */
+const RELEASABLE_TYPES = new Set([
+  'feat', 'fix', 'perf', 'revert', 'refactor', 'docs', 'build', 'ci',
+]);
+
 /** Faz o parse de uma mensagem de commit / título de PR. */
 function parseConventional(message, body) {
   const subject = String(message || '').split('\n')[0].trim();
@@ -88,6 +101,21 @@ function highestImpact(parsedCommits) {
     (acc, c) => (IMPACT_RANK[c.impact] > IMPACT_RANK[acc] ? c.impact : acc),
     'none'
   );
+}
+
+/**
+ * Impacto para **projetar a próxima versão**, alinhado ao que o release-please
+ * de fato faz: qualquer commit publicável gera release, e o bump padrão dele
+ * quando não há `feat` nem breaking é PATCH.
+ *
+ * Sem isso, um ciclo só de `ci:`/`docs:` é projetado como "nenhum bump" e o
+ * release-please publica um PATCH — foi o que aconteceu na promoção do PR #27,
+ * projetada como `v1.0.0` e publicada como `v1.0.1`.
+ */
+function releaseImpact(parsedCommits) {
+  const impact = highestImpact(parsedCommits);
+  if (impact !== 'none') return impact;
+  return parsedCommits.some((c) => RELEASABLE_TYPES.has(c.type)) ? 'patch' : 'none';
 }
 
 function validate({ prTitle, prBody, commits = [], labels = [], headRef = '', baseRef = 'develop' }) {
@@ -212,6 +240,8 @@ module.exports = {
   validate,
   parseConventional,
   highestImpact,
+  releaseImpact,
+  RELEASABLE_TYPES,
   COMMIT_TYPES,
   CHANGE_LABELS,
   BRANCH_PREFIXES,

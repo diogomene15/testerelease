@@ -2,7 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validate, parseConventional, highestImpact } = require('./validate-pr.js');
+const {
+  validate, parseConventional, highestImpact, releaseImpact,
+} = require('./validate-pr.js');
 
 const base = {
   prTitle: 'feat(api): adiciona endpoint de listagem',
@@ -154,4 +156,27 @@ test('back-merge de hotfix ainda exige Conventional Commits nos commits', () => 
 test('PR normal para develop não é tratado como back-merge de hotfix', () => {
   const r = validate(base);
   assert.equal(r.hotfixBackmerge, false);
+});
+
+// ---------------------------------------------- impacto para projetar versão
+
+const parse = (...messages) => messages.map((m) => parseConventional(m, ''));
+
+test('impacto de release acompanha o semântico quando ele existe', () => {
+  assert.equal(releaseImpact(parse('feat: a', 'ci: b')), 'minor');
+  assert.equal(releaseImpact(parse('fix: a', 'chore: b')), 'patch');
+  assert.equal(releaseImpact(parse('feat!: a')), 'major');
+});
+
+test('commits publicáveis sem impacto semântico ainda geram PATCH', () => {
+  // O release-please publica qualquer commit com seção visível no changelog.
+  assert.equal(highestImpact(parse('ci: a', 'docs: b')), 'none');
+  assert.equal(releaseImpact(parse('ci: a', 'docs: b')), 'patch');
+  assert.equal(releaseImpact(parse('refactor: a')), 'patch');
+  assert.equal(releaseImpact(parse('build: a')), 'patch');
+});
+
+test('tipos ocultos no changelog não geram release', () => {
+  assert.equal(releaseImpact(parse('chore: a', 'test: b', 'style: c')), 'none');
+  assert.equal(releaseImpact([]), 'none');
 });
