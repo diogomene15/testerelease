@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1-hf](https://github.com/diogomene15/testerelease/compare/v1.0.1...v1.0.1-hf) (2026-08-26)
+
+
+### 🐛 Correções
+
+* **saudacao:** trata nome nulo ou em branco sem quebrar a mensagem ([d38d67b](https://github.com/diogomene15/testerelease/commit/d38d67bb0b94167ced82754b472a02fab3462d74))
+* **saudacao:** trata nome nulo ou em branco sem quebrar a mensagem ([#29](https://github.com/diogomene15/testerelease/issues/29)) ([0cf515f](https://github.com/diogomene15/testerelease/commit/0cf515f3b131278da075285a7846a3a2d565a489))
+
 ## [1.0.1](https://github.com/diogomene15/testerelease/compare/v1.0.0...v1.0.1) (2026-08-26)
 
 
