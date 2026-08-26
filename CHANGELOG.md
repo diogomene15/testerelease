@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.1](https://github.com/diogomene15/testerelease/compare/v1.0.0...v1.0.1) (2026-08-26)
+
+
+### 🤖 CI/CD
+
+* **hotfix:** adiciona fluxo de hotfix com versões -hf e retroporte ([#23](https://github.com/diogomene15/testerelease/issues/23)) ([0d88780](https://github.com/diogomene15/testerelease/commit/0d88780669aabd6d30d287e6eb3ec2fdfb7840ba))
+* **hotfix:** usa PATCH como piso ao retirar o sufixo -hf ([#25](https://github.com/diogomene15/testerelease/issues/25)) ([7d4634e](https://github.com/diogomene15/testerelease/commit/7d4634eda72faaca2ada37314936ed2c6e26ca81))
+* **preview:** lê o manifesto estável da branch default ([#22](https://github.com/diogomene15/testerelease/issues/22)) ([c960bc8](https://github.com/diogomene15/testerelease/commit/c960bc8a030ca54159993e4a64949486eccec044))
+
 ## [1.0.0](https://github.com/diogomene15/testerelease/compare/v0.1.0...v1.0.0) (2026-08-25)
 
 
