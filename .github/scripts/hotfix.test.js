@@ -84,9 +84,11 @@ test('o ciclo seguinte a um hotfix publica a versão sem o sufixo', () => {
   assert.equal(postHotfixReleaseAs('stable', '1.0.0-hf.3', 'major'), '2.0.0');
 });
 
-test('sem commits com impacto não há versão a impor', () => {
-  assert.equal(postHotfixReleaseAs('stable', '1.0.0-hf', 'none'), null);
-  assert.equal(postHotfixReleaseAs('stable', '1.0.0-hf', undefined), null);
+test('impacto nenhum ainda impõe o PATCH limpo', () => {
+  // O release-please publica um ciclo só de `ci:`/`docs:` (são seções visíveis)
+  // e bumpa o PATCH. Sem o piso, esse ciclo sairia como `1.0.1-hf`.
+  assert.equal(postHotfixReleaseAs('stable', '1.0.0-hf', 'none'), '1.0.1');
+  assert.equal(postHotfixReleaseAs('stable', '1.0.0-hf', undefined), '1.0.1');
 });
 
 test('uma estável comum segue calculada pelo release-please', () => {

@@ -238,6 +238,14 @@ depois de um hotfix. O impacto é recontado a partir de `git log v<atual>..HEAD`
 com o mesmo parser do guard; o release-please continua montando o changelog
 sozinho.
 
+O piso desse cálculo é PATCH, mesmo quando nenhum commit tem impacto de versão.
+Os dois lados não classificam "publicável" da mesma forma: para o guard só
+`feat`, `fix`, `perf` e breaking movem a versão, enquanto o release-please
+publica **qualquer** commit que caia numa seção visível do changelog — `ci:` e
+`docs:` caem, e bumpa o PATCH. Sem o piso, um ciclo só de `ci:` voltaria a sair
+como `1.0.1-hf`. Impor uma versão nunca cria uma release: se o changelog sair
+vazio, o release-please não abre Release PR nenhum.
+
 ### 5. Branch sem o prefixo `hotfix/`
 
 Toda a detecção depende dele. Uma branch `fix/login-500` abrindo PR para `main`
