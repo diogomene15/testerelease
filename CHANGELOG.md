@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/diogomene15/testerelease/compare/v1.0.2...v1.0.3) (2026-08-26)
+
+
+### 🤖 CI/CD
+
+* **guard:** distingue divergência esperada de núcleos depois de um hotfix ([#40](https://github.com/diogomene15/testerelease/issues/40)) ([2e02803](https://github.com/diogomene15/testerelease/commit/2e02803cff633e4971b35190446cd1ea713aae60))
+* **preview:** mostra a estável real da promoção quando main está à frente da RC ([#42](https://github.com/diogomene15/testerelease/issues/42)) ([85699dc](https://github.com/diogomene15/testerelease/commit/85699dce995b5276713a8147410c4296b1b39e5e))
+
 ## [1.0.2](https://github.com/diogomene15/testerelease/compare/v1.0.1-hf...v1.0.2) (2026-08-26)
 
 
