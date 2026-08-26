@@ -16,3 +16,10 @@
 | `changes: feature` | `MINOR` — nova funcionalidade |
 | `changes: fix` | `PATCH` — correção |
 | `changes: chore` | nenhum bump |
+
+---
+
+Correção urgente em produção? Use o template de hotfix — acrescente
+`?template=hotfix.md` à URL do PR, ou veja [`docs/HOTFIX.md`](../docs/HOTFIX.md).
+O back-merge de um hotfix em `develop` precisa de título neutro
+(`chore(hotfix): …`) e da label `changes: chore`.

@@ -2,5 +2,6 @@
   { "name": "changes: breaking", "color": "b60205", "description": "Quebra compatibilidade — bump MAJOR" },
   { "name": "changes: feature",  "color": "0e8a16", "description": "Nova funcionalidade — bump MINOR" },
   { "name": "changes: fix",      "color": "fbca04", "description": "Correção de bug — bump PATCH" },
-  { "name": "changes: chore",    "color": "c5def5", "description": "Manutenção — sem bump de versão" }
+  { "name": "changes: chore",    "color": "c5def5", "description": "Manutenção — sem bump de versão" },
+  { "name": "hotfix",            "color": "d93f0b", "description": "Correção urgente em produção — fluxo hotfix/*" }
 ]

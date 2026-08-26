@@ -26,10 +26,10 @@ jobs:
     name: release-please · cálculo da versão RC
     runs-on: ubuntu-latest
     steps:
-      - name: Exigir que a origem seja develop
-        if: github.event.pull_request.head.ref != 'develop'
+      - name: Exigir que a origem seja develop ou hotfix
+        if: ${{ github.event.pull_request.head.ref != 'develop' && !startsWith(github.event.pull_request.head.ref, 'hotfix/') }}
         run: |
-          echo "::error::Só a branch 'develop' pode abrir PR para 'release'. Origem recebida: '${{ github.event.pull_request.head.ref }}'."
+          echo "::error::Só 'develop' (ciclo normal) ou 'hotfix/*' (retroporte) podem abrir PR para 'release'. Origem recebida: '${{ github.event.pull_request.head.ref }}'."
           exit 1
 
       - uses: actions/checkout@v4
@@ -39,6 +39,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      # Um retroporte de hotfix não é versionado pelos commits: o núcleo da RC
+      # avança um PATCH porque a estável que ela mirava já foi corrigida em
+      # produção. O dry-run recebe a mesma versão que o merge vai impor.
+      - name: Calcular a versão imposta quando a origem é um hotfix
+        id: hotfix
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          if ! node -e "process.exit(require('./.github/scripts/hotfix.js').isHotfixBranch(process.env.HEAD_REF) ? 0 : 1)"; then
+            echo "release_as=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT=$(git show "origin/${BASE_REF}:.release-please-manifest-rc.json" | jq -r '."."')
+          RELEASE_AS=$(node -e "process.stdout.write(require('./.github/scripts/hotfix.js').hotfixReleaseAs('rc', process.argv[1]))" "$CURRENT")
+
+          echo "Retroporte de hotfix: ${CURRENT} -> ${RELEASE_AS}."
+          echo "release_as=${RELEASE_AS}" >> "$GITHUB_OUTPUT"
 
       # O release-please busca commits por branch via GraphQL e não enxerga
       # `refs/pull/N/merge`. Publicar o merge simulado como uma branch efêmera
@@ -94,7 +116,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PREVIEW_REF: ${{ steps.ephemeral.outputs.ref }}
+          RELEASE_AS: ${{ steps.hotfix.outputs.release_as }}
         run: |
+          ARGS=()
+          if [ -n "${RELEASE_AS}" ]; then
+            ARGS+=(--release-as="${RELEASE_AS}")
+          fi
+
           set +e
           npx --yes release-please@16 release-pr \
             --token="${GITHUB_TOKEN}" \
@@ -102,6 +130,7 @@ jobs:
             --target-branch="${PREVIEW_REF}" \
             --config-file=release-please-config-rc.json \
             --manifest-file=.release-please-manifest-rc.json \
+            "${ARGS[@]}" \
             --dry-run \
             > rp-dryrun.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
@@ -122,6 +151,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           RP_EXIT_CODE: ${{ steps.rp.outputs.exit_code }}
+          HOTFIX_RELEASE_AS: ${{ steps.hotfix.outputs.release_as }}
         with:
           script: |
             const fs = require('fs');
@@ -130,19 +160,24 @@ jobs:
             const { nextRc, stableCore } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
 
             const pr = context.payload.pull_request;
+            const hotfixReleaseAs = process.env.HOTFIX_RELEASE_AS || null;
 
-            // Estado das versões conforme registrado na branch alvo (`release`).
-            const readManifest = (file) => {
+            const readManifest = (ref, file) => {
               try {
-                const raw = execFileSync('git', ['show', `origin/${pr.base.ref}:${file}`], { encoding: 'utf8' });
+                const raw = execFileSync('git', ['show', `origin/${ref}:${file}`], { encoding: 'utf8' });
                 return JSON.parse(raw)['.'];
               } catch {
                 return null;
               }
             };
 
-            const lastRc = readManifest('.release-please-manifest-rc.json') || '0.0.0';
-            const lastStable = readManifest('.release-please-manifest.json') || '0.0.0';
+            // Cada track guarda seu estado na branch onde publica: o RC em
+            // `release`, o estável na branch default. Ler o manifesto estável a
+            // partir de `release` sempre devolveria 0.0.0, porque os commits de
+            // release da branch default nunca chegam à staging.
+            const defaultBranch = context.payload.repository.default_branch;
+            const lastRc = readManifest(pr.base.ref, '.release-please-manifest-rc.json') || '0.0.0';
+            const lastStable = readManifest(defaultBranch, '.release-please-manifest.json') || '0.0.0';
 
             const rawCommits = await github.paginate(github.rest.pulls.listCommits, {
               owner: context.repo.owner,
@@ -160,7 +195,7 @@ jobs:
             const relevant = parsed.filter((p) => p.valid);
             const invalid = parsed.filter((p) => !p.valid);
             const impact = highestImpact(relevant);
-            const projected = nextRc(lastStable, lastRc, impact);
+            const projected = hotfixReleaseAs ?? nextRc(lastStable, lastRc, impact);
 
             let dryRun = '(dry-run não executado)';
             try {
@@ -172,9 +207,11 @@ jobs:
             // verdade. A projeção local só entra se o dry-run não produzir uma.
             const computed = dryRun.match(/^title:.*?\bv(\d+\.\d+\.\d+[^\s]*)\s*$/m)?.[1] ?? null;
             const version = computed ?? projected;
-            const origem = computed
-              ? 'calculada pelo `release-please`'
-              : '⚠️ projeção local — o dry-run não retornou versão';
+            const origem = hotfixReleaseAs
+              ? 'imposta pela política de hotfix (`--release-as`)'
+              : computed
+                ? 'calculada pelo `release-please`'
+                : '⚠️ projeção local — o dry-run não retornou versão';
 
             const IMPACT_LABEL = {
               major: '`MAJOR` — quebra de compatibilidade',
@@ -204,9 +241,14 @@ jobs:
 
             const lines = [
               '<!-- pr-release-preview -->',
-              '## 🧪 Prévia da Release Candidate',
+              hotfixReleaseAs
+                ? '## 🚑 Retroporte de hotfix para staging'
+                : '## 🧪 Prévia da Release Candidate',
               '',
-              'O `release-please` analisou os commits semânticos que entrarão em `release`.',
+              hotfixReleaseAs
+                ? 'A correção já foi publicada em produção. A RC atual aponta para uma estável que o ' +
+                  'hotfix corrigiu, então o núcleo avança um **PATCH** e o contador de RC reinicia.'
+                : 'O `release-please` analisou os commits semânticos que entrarão em `release`.',
               '',
               '| | |',
               '| --- | --- |',
@@ -220,10 +262,19 @@ jobs:
               '',
             ];
 
-            if (impact === 'none' && !computed) {
+            if (impact === 'none' && !computed && !hotfixReleaseAs) {
               lines.push(
                 '> ⚠️ Nenhum commit com impacto de versão (`feat`, `fix`, `perf`, breaking).',
                 '> O merge não vai gerar uma nova release candidate.',
+                ''
+              );
+            }
+
+            if (hotfixReleaseAs) {
+              lines.push(
+                `> ℹ️ O impacto dos commits (${IMPACT_LABEL[impact]}) é informativo aqui: a versão de um`,
+                '> retroporte de hotfix é imposta, não calculada. Falta ainda o back-merge para `develop`',
+                '> — com título `chore(hotfix): …`, para não gerar um terceiro bump.',
                 ''
               );
             }
