@@ -1,6 +1,8 @@
 name: release-please (reutilizável)
 
 # Executa o ciclo completo do release-please em uma branch alvo:
+#   0. detecção          — se o push veio de um `hotfix/*`, a versão deixa de
+#                          ser calculada pelos commits e passa a ser imposta;
 #   1. `release-pr`      — calcula a versão pelos commits semânticos, atualiza
 #                          changelog/manifesto e abre o Release PR;
 #   2. merge automático  — para que o merge que disparou o workflow já resulte
@@ -51,18 +53,118 @@ jobs:
           MANIFEST='${{ inputs.manifest-file }}'
           echo "version=$(jq -r '."."' "$MANIFEST")" >> "$GITHUB_OUTPUT"
 
+      # Duas situações tiram a versão das mãos do release-please, e as duas são
+      # resolvidas aqui, com `--release-as`:
+      #
+      #  1. o push veio de um `hotfix/*` — em `main` o núcleo é preservado
+      #     (1.0.2 -> 1.0.2-hf) e em `release` ele avança um PATCH
+      #     (1.0.1-rc.3 -> 1.0.2-rc.1);
+      #  2. o ciclo normal publica em cima de um `-hf` — os updaters do
+      #     release-please carregam o prerelease adiante (1.0.0-hf -> 1.0.1-hf),
+      #     então a versão limpa também precisa ser imposta.
+      #
+      # Ver `.github/scripts/hotfix.js`.
+      - name: Determinar se a versão precisa ser imposta
+        id: hotfix
+        uses: actions/github-script@v7
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          CURRENT_VERSION: ${{ steps.before.outputs.version }}
+        with:
+          script: |
+            const { execFileSync } = require('child_process');
+            const { findHotfixPullRequest, hotfixReleaseAs, postHotfixReleaseAs } =
+              require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/hotfix.js`);
+            const { parseConventional, highestImpact } =
+              require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
+
+            const channel = process.env.CHANNEL;
+            const current = process.env.CURRENT_VERSION;
+
+            let pulls = [];
+            try {
+              pulls = await github.paginate(
+                github.rest.repos.listPullRequestsAssociatedWithCommit,
+                { owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha, per_page: 100 }
+              );
+            } catch (error) {
+              core.warning(`Não foi possível listar os PRs de ${context.sha}: ${error.message}`);
+            }
+
+            const pr = findHotfixPullRequest(pulls, context.sha);
+
+            // ------------------------------------------------------- 1. hotfix
+            if (pr) {
+              const releaseAs = hotfixReleaseAs(channel, current);
+              if (releaseAs) {
+                core.notice(
+                  `Hotfix detectado (PR #${pr.number}, branch \`${pr.head.ref}\`): ` +
+                  `${current} -> ${releaseAs}.`
+                );
+                core.setOutput('release_as', releaseAs);
+                core.setOutput('reason', 'hotfix');
+                core.setOutput('pr', String(pr.number));
+                core.setOutput('branch', pr.head.ref);
+                return;
+              }
+              core.warning(`Canal '${channel}' não tem política de hotfix — versionamento normal.`);
+            }
+
+            // ------------------------------ 2. ciclo normal em cima de um `-hf`
+            // O impacto é recontado aqui só para escolher o bump; o release-please
+            // continua montando o changelog a partir dos mesmos commits.
+            let impact = 'none';
+            try {
+              const range = `v${current}..HEAD`;
+              const log = execFileSync('git', ['log', range, '--format=%B%x00'], { encoding: 'utf8' });
+              const parsed = log
+                .split('\0')
+                .map((m) => m.trim())
+                .filter(Boolean)
+                .map((m) => parseConventional(m, ''))
+                .filter((c) => c.valid);
+              impact = highestImpact(parsed);
+              core.info(`${parsed.length} commit(s) semânticos desde v${current} — impacto ${impact}.`);
+            } catch (error) {
+              core.warning(`Não foi possível contar os commits desde v${current}: ${error.message}`);
+            }
+
+            const sanitized = postHotfixReleaseAs(channel, current, impact);
+            if (!sanitized) {
+              core.info('Versão calculada pelo release-please a partir dos commits — nada a impor.');
+              core.setOutput('release_as', '');
+              core.setOutput('reason', '');
+              return;
+            }
+
+            core.notice(
+              `Ciclo normal sobre um hotfix: ${current} -> ${sanitized} ` +
+              '(os updaters do release-please manteriam o sufixo `-hf`).'
+            );
+            core.setOutput('release_as', sanitized);
+            core.setOutput('reason', 'pos-hotfix');
+
       - name: release-please · abrir/atualizar Release PR
         id: release_pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_AS: ${{ steps.hotfix.outputs.release_as }}
         run: |
           set -o pipefail
+
+          ARGS=()
+          if [ -n "${RELEASE_AS}" ]; then
+            echo "Impondo a versão ${RELEASE_AS} com --release-as."
+            ARGS+=(--release-as="${RELEASE_AS}")
+          fi
+
           npx --yes release-please@16 release-pr \
             --token="${GITHUB_TOKEN}" \
             --repo-url="${GITHUB_REPOSITORY}" \
             --target-branch='${{ inputs.target-branch }}' \
             --config-file='${{ inputs.config-file }}' \
             --manifest-file='${{ inputs.manifest-file }}' \
+            "${ARGS[@]}" \
             2>&1 | tee release-pr.log
 
           # Saber se houve trabalho evita esperar por um PR que não existe
@@ -151,6 +253,10 @@ jobs:
           CHANNEL: ${{ inputs.channel }}
           BEFORE: ${{ steps.before.outputs.version }}
           MERGED: ${{ steps.merge.outputs.merged }}
+          HOTFIX_PR: ${{ steps.hotfix.outputs.pr }}
+          HOTFIX_BRANCH: ${{ steps.hotfix.outputs.branch }}
+          RELEASE_AS: ${{ steps.hotfix.outputs.release_as }}
+          REASON: ${{ steps.hotfix.outputs.reason }}
         run: |
           set -euo pipefail
 
@@ -165,6 +271,19 @@ jobs:
             echo "| Versão anterior | \`${BEFORE}\` |"
             echo "| Versão atual | \`${AFTER}\` |"
             echo "| Release PR mergeado | \`${MERGED:-false}\` |"
+            case "${REASON:-}" in
+              hotfix)
+                echo "| Origem | 🚑 hotfix — PR #${HOTFIX_PR} (\`${HOTFIX_BRANCH}\`) |"
+                echo "| Versão imposta | \`${RELEASE_AS}\` (\`--release-as\`) |"
+                ;;
+              pos-hotfix)
+                echo "| Origem | ciclo normal sobre um hotfix — sufixo \`-hf\` retirado |"
+                echo "| Versão imposta | \`${RELEASE_AS}\` (\`--release-as\`) |"
+                ;;
+              *)
+                echo "| Origem | ciclo normal — versão calculada pelos commits |"
+                ;;
+            esac
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${MERGED:-false}" = "true" ]; then

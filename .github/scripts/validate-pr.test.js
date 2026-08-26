@@ -97,3 +97,61 @@ test('escopo com barra e ponto é aceito', () => {
   assert.equal(p.valid, true);
   assert.equal(p.scope, 'src/app.js');
 });
+
+// -------------------------------------------- back-merge de hotfix em develop
+
+const hotfixBase = {
+  prTitle: 'chore(hotfix): retroporta correção do login para develop',
+  prBody: '',
+  commits: [{ sha: 'def5678', message: 'fix(login): trata sessão expirada' }],
+  labels: ['changes: chore'],
+  headRef: 'hotfix/login-500',
+  baseRef: 'develop',
+};
+
+test('back-merge de hotfix com título neutro passa', () => {
+  const r = validate(hotfixBase);
+  assert.equal(r.ok, true, r.errors.join('\n'));
+  assert.equal(r.hotfixBackmerge, true);
+  assert.equal(r.actualImpact, 'none');
+});
+
+test('back-merge de hotfix com título versionável falha', () => {
+  const r = validate({ ...hotfixBase, prTitle: 'fix(login): trata sessão expirada' });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join('\n'), /não pode gerar versão/);
+});
+
+test('back-merge de hotfix com label não neutra falha', () => {
+  const r = validate({ ...hotfixBase, labels: ['changes: fix'] });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join('\n'), /precisa da label `changes: chore`/);
+});
+
+test('os commits fix: de dentro do hotfix não contaminam o impacto', () => {
+  // Sem a exceção, a regra de coerência acusaria a label `changes: chore` de
+  // subestimar o `fix:` do commit.
+  const r = validate({
+    ...hotfixBase,
+    commits: [
+      { sha: 'def5678', message: 'fix(login): trata sessão expirada' },
+      { sha: 'def5679', message: 'test(login): cobre sessão expirada' },
+    ],
+  });
+  assert.equal(r.ok, true, r.errors.join('\n'));
+  assert.equal(r.actualImpact, 'none');
+});
+
+test('back-merge de hotfix ainda exige Conventional Commits nos commits', () => {
+  const r = validate({
+    ...hotfixBase,
+    commits: [{ sha: 'def5678', message: 'corrige login' }],
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join('\n'), /fora do padrão Conventional Commits/);
+});
+
+test('PR normal para develop não é tratado como back-merge de hotfix', () => {
+  const r = validate(base);
+  assert.equal(r.hotfixBackmerge, false);
+});
