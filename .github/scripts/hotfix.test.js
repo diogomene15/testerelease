@@ -19,6 +19,8 @@ test('reconhece a branch de hotfix pelo prefixo', () => {
   assert.equal(isHotfixBranch('feature/login'), false);
   assert.equal(isHotfixBranch('hotfix'), false);      // sem descrição
   assert.equal(isHotfixBranch('hotfixes/login'), false);
+  // A branch do back-merge ③ é derivada de `develop`, mas mantém o prefixo.
+  assert.equal(isHotfixBranch('hotfix/login-500--develop'), true);
   assert.equal(isHotfixBranch(undefined), false);
 });
 

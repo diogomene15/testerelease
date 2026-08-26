@@ -156,7 +156,7 @@ jobs:
           script: |
             const fs = require('fs');
             const { execFileSync } = require('child_process');
-            const { parseConventional, highestImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
+            const { parseConventional, highestImpact, releaseImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
             const { nextRc, stableCore } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
 
             const pr = context.payload.pull_request;
@@ -195,7 +195,10 @@ jobs:
             const relevant = parsed.filter((p) => p.valid);
             const invalid = parsed.filter((p) => !p.valid);
             const impact = highestImpact(relevant);
-            const projected = hotfixReleaseAs ?? nextRc(lastStable, lastRc, impact);
+            // A projeção segue o critério do release-please (qualquer commit com
+            // seção visível publica), não o semântico do guard.
+            const bump = releaseImpact(relevant);
+            const projected = hotfixReleaseAs ?? nextRc(lastStable, lastRc, bump);
 
             let dryRun = '(dry-run não executado)';
             try {
@@ -262,7 +265,7 @@ jobs:
               '',
             ];
 
-            if (impact === 'none' && !computed && !hotfixReleaseAs) {
+            if (bump === 'none' && !computed && !hotfixReleaseAs) {
               lines.push(
                 '> ⚠️ Nenhum commit com impacto de versão (`feat`, `fix`, `perf`, breaking).',
                 '> O merge não vai gerar uma nova release candidate.',
