@@ -39,7 +39,7 @@ jobs:
         with:
           script: |
             const { execFileSync } = require('child_process');
-            const { parseConventional, highestImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
+            const { parseConventional, highestImpact, releaseImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
             const { bumpStable, stableCore, nextHotfix, nextRcForHotfix } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
             const { isHotfixBranch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/hotfix.js`);
 
@@ -67,10 +67,14 @@ jobs:
               .filter((p) => p.valid);
 
             const impact = highestImpact(parsed);
+            // O release-please publica qualquer commit com seção visível no
+            // changelog, então a projeção usa o impacto de release, não o
+            // semântico: um ciclo só de `ci:` ainda sai como PATCH.
+            const bump = releaseImpact(parsed);
 
             // O hotfix não passa pela homologação: a versão não vem do impacto
             // dos commits, e sim da estável que está em produção agora.
-            const projected = isHotfix ? nextHotfix(lastStable) : bumpStable(lastStable, impact);
+            const projected = isHotfix ? nextHotfix(lastStable) : bumpStable(lastStable, bump);
 
             const IMPACT_LABEL = {
               major: '`MAJOR` — quebra de compatibilidade',
@@ -95,6 +99,9 @@ jobs:
             lines.push(
               `| Em produção hoje | \`${lastStable === '0.0.0' ? '—' : 'v' + lastStable}\` |`,
               `| Impacto dos commits | ${IMPACT_LABEL[impact]}${isHotfix ? ' (não altera o núcleo)' : ''} |`,
+              ...(!isHotfix && bump !== impact
+                ? [`| Bump aplicado | \`PATCH\` — há commits publicáveis (\`ci\`, \`docs\`, …) |`]
+                : []),
               `| **Versão a publicar** | **\`v${projected}\`** |`,
               ''
             );

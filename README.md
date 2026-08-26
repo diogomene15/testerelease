@@ -30,7 +30,7 @@ com uma regra de versão por destino:
 | --- | --- | --- |
 | `hotfix/*` → `main` | **merge commit** | núcleo preservado + `-hf`: `1.0.2` → `1.0.2-hf` → `1.0.2-hf.2` |
 | `hotfix/*` → `release` | **merge commit** | PATCH no núcleo: `1.0.1-rc.3` → `1.0.2-rc.1` |
-| `hotfix/*` → `develop` | **squash** | nenhuma — o título precisa ser `chore(hotfix): …` |
+| `hotfix/*--develop` → `develop` | **squash** | nenhuma — cherry-pick da correção, título `chore(hotfix): …` |
 
 Essas versões não saem de nenhuma estratégia do release-please: são calculadas
 em `.github/scripts/` e impostas a ele com `--release-as`.
@@ -63,7 +63,7 @@ Todo PR para `develop` precisa de **exatamente uma**:
 
 | Arquivo | Função |
 | --- | --- |
-| `validate-pr.js` | Regras dos PRs para `develop` |
+| `validate-pr.js` | Regras dos PRs para `develop`; impacto semântico e impacto de release |
 | `compute-version.js` | Projeção das versões do ciclo e cálculo das de hotfix |
 | `hotfix.js` | Detecta o PR de hotfix que originou um push e escolhe a versão do canal |
 
