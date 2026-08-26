@@ -121,7 +121,7 @@ Tipos aceitos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
 
 ## Armadilhas do release-please neste arranjo
 
-Sete comportamentos do release-please que quebram este fluxo silenciosamente —
+Oito comportamentos do release-please que quebram este fluxo silenciosamente —
 todos encontrados rodando o fluxo de ponta a ponta, não lendo a documentação.
 
 ### 1. `pull-request-title-pattern` exige `${scope}` e `${component}`
@@ -220,6 +220,25 @@ estratégia `prerelease` reescreve o identificador), mas no track estável, depo
 de um `-hf`, toda versão seguinte sairia `1.0.1-hf`, `1.0.2-hf`… O fluxo impõe a
 versão limpa com `--release-as` no primeiro ciclo normal depois de um hotfix —
 ver [`HOTFIX.md`](HOTFIX.md#4-o-sufixo--hf-gruda-no-track-estável).
+
+### 8. "Publicável" não é o mesmo que "move a versão"
+
+O release-please publica uma release para **qualquer** commit que caia numa
+seção visível do changelog, e nesses casos bumpa o PATCH. Como as configs deste
+repositório deixam `docs`, `build`, `ci` e `refactor` visíveis, um ciclo só de
+`ci:` publica versão — mesmo que nenhuma regra semântica peça bump.
+
+São dois conceitos distintos, e o código os separa:
+
+| | Pergunta | Onde |
+| --- | --- | --- |
+| `TYPE_IMPACT` / `highestImpact` | quanto esta entrega move a versão? | política de labels em `develop` |
+| `RELEASABLE_TYPES` / `releaseImpact` | o release-please vai publicar? | projeção de versão nos guards |
+
+Confundir os dois faz o guard prometer uma versão e o release-please publicar
+outra: a promoção do PR #27 foi projetada como `v1.0.0` e publicada como
+`v1.0.1`. Só `test`, `style` e `chore` (as seções `hidden`) não publicam nada —
+é por isso que o back-merge de hotfix em `develop` exige título `chore`.
 
 ## Interação com as configurações do repositório
 

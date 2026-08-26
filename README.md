@@ -63,7 +63,7 @@ Todo PR para `develop` precisa de **exatamente uma**:
 
 | Arquivo | Função |
 | --- | --- |
-| `validate-pr.js` | Regras dos PRs para `develop` |
+| `validate-pr.js` | Regras dos PRs para `develop`; impacto semântico e impacto de release |
 | `compute-version.js` | Projeção das versões do ciclo e cálculo das de hotfix |
 | `hotfix.js` | Detecta o PR de hotfix que originou um push e escolhe a versão do canal |
 
