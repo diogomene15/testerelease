@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1-rc.2](https://github.com/diogomene15/testerelease/compare/v1.0.1-rc.1...v1.0.1-rc.2) (2026-08-26)
+
+
+### 🤖 CI/CD
+
+* **guards:** projeta a versão pelo critério de publicação do release-please ([#34](https://github.com/diogomene15/testerelease/issues/34)) ([b175833](https://github.com/diogomene15/testerelease/commit/b175833d4f3e73379504faa68ea4a1b51f95d4b8))
+
 ## [1.0.1-rc.1](https://github.com/diogomene15/testerelease/compare/v1.0.0-rc.2...v1.0.1-rc.1) (2026-08-26)
 
 
