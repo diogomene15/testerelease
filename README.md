@@ -21,6 +21,22 @@ feature/*  ──squash──▶  develop  ──merge──▶  release  ──
 
 Detalhes em [`docs/BRANCHING.md`](docs/BRANCHING.md).
 
+## Hotfix
+
+Correção urgente que sai de `main` e volta para as três branches permanentes,
+com uma regra de versão por destino:
+
+| Transição | Merge | Versão |
+| --- | --- | --- |
+| `hotfix/*` → `main` | **merge commit** | núcleo preservado + `-hf`: `1.0.2` → `1.0.2-hf` → `1.0.2-hf.2` |
+| `hotfix/*` → `release` | **merge commit** | PATCH no núcleo: `1.0.1-rc.3` → `1.0.2-rc.1` |
+| `hotfix/*` → `develop` | **squash** | nenhuma — o título precisa ser `chore(hotfix): …` |
+
+Essas versões não saem de nenhuma estratégia do release-please: são calculadas
+em `.github/scripts/` e impostas a ele com `--release-as`.
+
+Detalhes em [`docs/HOTFIX.md`](docs/HOTFIX.md).
+
 ## Labels de mudança
 
 Todo PR para `develop` precisa de **exatamente uma**:
@@ -36,16 +52,23 @@ Todo PR para `develop` precisa de **exatamente uma**:
 
 | Arquivo | Gatilho | Função |
 | --- | --- | --- |
-| `pr-develop-guard.yml` | PR → `develop` | Valida label, título e commits |
-| `pr-release-preview.yml` | PR → `release` | release-please em dry-run: prevê a RC |
-| `pr-main-guard.yml` | PR → `main` | Valida origem e prevê a versão estável |
+| `pr-develop-guard.yml` | PR → `develop` | Valida label, título e commits; exige back-merge de hotfix neutro |
+| `pr-release-preview.yml` | PR → `release` | release-please em dry-run: prevê a RC (ou a versão imposta pelo hotfix) |
+| `pr-main-guard.yml` | PR → `main` | Valida origem (`release` ou `hotfix/*`) e prevê a versão |
 | `release-candidate.yml` | push em `release` | Publica `vX.Y.Z-rc.N` (pre-release) |
-| `release-stable.yml` | push em `main` | Publica `vX.Y.Z` (estável) |
-| `release-please-run.yml` | `workflow_call` | Ciclo release-please compartilhado |
+| `release-stable.yml` | push em `main` | Publica `vX.Y.Z` (estável) ou `vX.Y.Z-hf` |
+| `release-please-run.yml` | `workflow_call` | Ciclo release-please compartilhado + detecção de hotfix |
+
+## Scripts
+
+| Arquivo | Função |
+| --- | --- |
+| `validate-pr.js` | Regras dos PRs para `develop` |
+| `compute-version.js` | Projeção das versões do ciclo e cálculo das de hotfix |
+| `hotfix.js` | Detecta o PR de hotfix que originou um push e escolhe a versão do canal |
 
 ## Testes locais
 
 ```bash
-node --test .github/scripts/validate-pr.test.js
-node --test .github/scripts/compute-version.test.js
+node --test .github/scripts/*.test.js
 ```

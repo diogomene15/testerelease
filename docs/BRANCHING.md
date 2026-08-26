@@ -10,9 +10,16 @@ feature/*  ──squash──▶  develop  ──merge──▶  release  ──
                                                  │                   │
                                             vX.Y.Z-rc.N           vX.Y.Z
                                             (pre-release)        (estável)
+
+main ──▶ hotfix/*  ──merge──▶  main       vX.Y.Z-hf      (núcleo preservado)
+                   ──merge──▶  release   vX.Y.(Z+1)-rc.1  (PATCH no núcleo)
+                   ──squash──▶ develop   nenhuma versão
 ```
 
-## As três transições
+## As três transições do ciclo
+
+O hotfix é a quarta transição e tem regras próprias — ver
+[`HOTFIX.md`](HOTFIX.md).
 
 ### 1. `feature/*` → `develop`
 
@@ -58,6 +65,22 @@ Ao mergear, o workflow `Release Estável · main` roda o mesmo ciclo, mas com a
 config estável: tag `vX.Y.Z`, `CHANGELOG.md` atualizado e release no GitHub com
 release notes — sem a marca de pre-release.
 
+Além de `release`, `hotfix/*` também pode abrir PR para `main` — é o caminho que
+pula a homologação de propósito. Ver abaixo.
+
+## A quarta transição: `hotfix/*`
+
+Documentada por inteiro em [`HOTFIX.md`](HOTFIX.md). O resumo:
+
+| PR | Merge | Versão |
+| --- | --- | --- |
+| `hotfix/*` → `main` | merge commit | núcleo preservado + `-hf` (`1.0.2` → `1.0.2-hf` → `1.0.2-hf.2`) |
+| `hotfix/*` → `release` | merge commit | PATCH no núcleo (`1.0.1-rc.3` → `1.0.2-rc.1`) |
+| `hotfix/*` → `develop` | squash | nenhuma — título tem de ser neutro (`chore(hotfix): …`) |
+
+Nenhuma dessas versões sai de uma estratégia do release-please: elas são
+calculadas em `.github/scripts/` e impostas com `--release-as`.
+
 ## Por que dois tracks de versão separados
 
 O ponto delicado de rodar release-please em duas branches é o **estado
@@ -72,8 +95,8 @@ A configuração evita isso mantendo os arquivos de cada track disjuntos:
 | Manifesto | `.release-please-manifest-rc.json` | `.release-please-manifest.json` |
 | Changelog | `CHANGELOG-RC.md` | `CHANGELOG.md` |
 | Arquivo de versão | — (`release-type: go`) | `version.txt` (`release-type: simple`) |
-| Tags | `vX.Y.Z-rc.N` | `vX.Y.Z` |
-| Release no GitHub | pre-release | estável |
+| Tags | `vX.Y.Z-rc.N` | `vX.Y.Z`, `vX.Y.Z-hf[.N]` |
+| Release no GitHub | pre-release | estável (o `-hf` também) |
 
 Nenhum arquivo é escrito pelos dois lados, então `release → main` nunca conflita.
 Os tracks convergem naturalmente porque ambos calculam a versão a partir dos
@@ -98,7 +121,7 @@ Tipos aceitos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
 
 ## Armadilhas do release-please neste arranjo
 
-Quatro comportamentos do release-please que quebram este fluxo silenciosamente —
+Sete comportamentos do release-please que quebram este fluxo silenciosamente —
 todos encontrados rodando o fluxo de ponta a ponta, não lendo a documentação.
 
 ### 1. `pull-request-title-pattern` exige `${scope}` e `${component}`
@@ -172,13 +195,6 @@ aviso, não um erro. Nada é publicado e nada falha.
 exatamente esse estado. Para destravar, remova a label `autorelease: pending` do
 PR mergeado que ficou sem tag.
 
-## Interação com as configurações do repositório
-
-`delete_branch_on_merge` **precisa ficar desligado**. Com ele ativo, o merge de
-`develop → release` apaga a branch `develop` — a regra `deletion` do ruleset não
-impede, porque quem faz o merge normalmente tem bypass. As branches de feature
-são apagadas explicitamente com `gh pr merge --delete-branch`.
-
 ### 6. Um run cancelado bloqueia o merge indefinidamente
 
 `concurrency.cancel-in-progress: true` é o padrão recomendado para economizar
@@ -195,3 +211,19 @@ mergeStateStatus: BLOCKED
 Dois eventos próximos bastam para provocar — abrir o PR e aplicar a label, por
 exemplo. Por isso o guard de `develop` roda com `cancel-in-progress: false`. Se
 um PR já ficou travado assim, `gh run rerun <id>` no run cancelado o libera.
+
+### 7. Os updaters carregam o prerelease para a versão seguinte
+
+`MajorVersionUpdate`, `MinorVersionUpdate` e `PatchVersionUpdate` repassam
+`version.preRelease` intacto ao bumpar. No track de RC isso é inofensivo (a
+estratégia `prerelease` reescreve o identificador), mas no track estável, depois
+de um `-hf`, toda versão seguinte sairia `1.0.1-hf`, `1.0.2-hf`… O fluxo impõe a
+versão limpa com `--release-as` no primeiro ciclo normal depois de um hotfix —
+ver [`HOTFIX.md`](HOTFIX.md#4-o-sufixo--hf-gruda-no-track-estável).
+
+## Interação com as configurações do repositório
+
+`delete_branch_on_merge` **precisa ficar desligado**. Com ele ativo, o merge de
+`develop → release` apaga a branch `develop` — a regra `deletion` do ruleset não
+impede, porque quem faz o merge normalmente tem bypass. As branches de feature
+são apagadas explicitamente com `gh pr merge --delete-branch`.

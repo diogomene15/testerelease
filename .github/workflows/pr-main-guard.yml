@@ -1,6 +1,8 @@
 name: Guard · release → main
 
-# `main` só recebe código que já passou pela homologação em `release`.
+# `main` só recebe código que já passou pela homologação em `release` — ou uma
+# correção urgente vinda de `hotfix/*`, que é justamente o caminho que pula a
+# homologação. Nenhuma outra origem é aceita.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
@@ -22,10 +24,10 @@ jobs:
     name: Origem e versão a promover
     runs-on: ubuntu-latest
     steps:
-      - name: Exigir que a origem seja release
-        if: github.event.pull_request.head.ref != 'release'
+      - name: Exigir que a origem seja release ou hotfix
+        if: ${{ github.event.pull_request.head.ref != 'release' && !startsWith(github.event.pull_request.head.ref, 'hotfix/') }}
         run: |
-          echo "::error::Só a branch 'release' pode abrir PR para 'main'. Origem recebida: '${{ github.event.pull_request.head.ref }}'."
+          echo "::error::Só 'release' (promoção) ou 'hotfix/*' (correção urgente) podem abrir PR para 'main'. Origem recebida: '${{ github.event.pull_request.head.ref }}'."
           exit 1
 
       - uses: actions/checkout@v4
@@ -38,9 +40,11 @@ jobs:
           script: |
             const { execFileSync } = require('child_process');
             const { parseConventional, highestImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
-            const { bumpStable, stableCore } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
+            const { bumpStable, stableCore, nextHotfix, nextRcForHotfix } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
+            const { isHotfixBranch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/hotfix.js`);
 
             const pr = context.payload.pull_request;
+            const isHotfix = isHotfixBranch(pr.head.ref);
 
             const readManifest = (ref, file) => {
               try {
@@ -63,7 +67,10 @@ jobs:
               .filter((p) => p.valid);
 
             const impact = highestImpact(parsed);
-            const projected = bumpStable(lastStable, impact);
+
+            // O hotfix não passa pela homologação: a versão não vem do impacto
+            // dos commits, e sim da estável que está em produção agora.
+            const projected = isHotfix ? nextHotfix(lastStable) : bumpStable(lastStable, impact);
 
             const IMPACT_LABEL = {
               major: '`MAJOR` — quebra de compatibilidade',
@@ -74,19 +81,44 @@ jobs:
 
             const lines = [
               '<!-- pr-main-guard -->',
-              '## 🚀 Promoção para produção',
+              isHotfix ? '## 🚑 Hotfix em produção' : '## 🚀 Promoção para produção',
               '',
               '| | |',
               '| --- | --- |',
-              `| Origem | \`${pr.head.ref}\` (staging) |`,
-              `| RC homologada | \`${currentRc === '0.0.0' ? '—' : 'v' + currentRc}\` |`,
-              `| Última estável | \`${lastStable === '0.0.0' ? '—' : 'v' + lastStable}\` |`,
-              `| Impacto dos commits | ${IMPACT_LABEL[impact]} |`,
-              `| **Versão estável a publicar** | **\`v${projected}\`** |`,
-              '',
+              `| Origem | \`${pr.head.ref}\` ${isHotfix ? '(correção urgente)' : '(staging)'} |`,
             ];
 
-            if (currentRc !== '0.0.0' && stableCore(currentRc) !== projected) {
+            if (!isHotfix) {
+              lines.push(`| RC homologada | \`${currentRc === '0.0.0' ? '—' : 'v' + currentRc}\` |`);
+            }
+
+            lines.push(
+              `| Em produção hoje | \`${lastStable === '0.0.0' ? '—' : 'v' + lastStable}\` |`,
+              `| Impacto dos commits | ${IMPACT_LABEL[impact]}${isHotfix ? ' (não altera o núcleo)' : ''} |`,
+              `| **Versão a publicar** | **\`v${projected}\`** |`,
+              ''
+            );
+
+            if (isHotfix) {
+              const rcHoje = readManifest('release', '.release-please-manifest-rc.json');
+              const rcDepois = rcHoje ? nextRcForHotfix(rcHoje) : null;
+
+              lines.push(
+                'O núcleo `' + stableCore(lastStable) + '` é preservado: o hotfix é publicado **sobre** a',
+                'estável que já está em produção, com o sufixo `-hf`. Hotfixes seguintes sobre a mesma',
+                'estável avançam o contador (`-hf.2`, `-hf.3`, …).',
+                '',
+                '### Back-merges obrigatórios depois deste PR',
+                '',
+                '| PR | Merge | Versão resultante |',
+                '| --- | --- | --- |',
+                `| \`${pr.head.ref}\` → \`release\` | merge commit | ${rcDepois ? `\`v${rcHoje}\` → **\`v${rcDepois}\`**` : 'PATCH no núcleo da RC'} |`,
+                `| \`${pr.head.ref}\` → \`develop\` | squash | nenhuma — título \`chore(hotfix): …\` |`,
+                '',
+                'Sem eles a correção volta a sumir no próximo ciclo. Detalhes em [`docs/HOTFIX.md`](../blob/main/docs/HOTFIX.md).',
+                ''
+              );
+            } else if (currentRc !== '0.0.0' && stableCore(currentRc) !== projected) {
               lines.push(
                 `> ⚠️ A RC homologada (\`v${currentRc}\`) aponta para \`v${stableCore(currentRc)}\`, `,
                 `> mas a promoção calculou \`v${projected}\`. Confira se \`release\` está em dia com \`main\`.`,
