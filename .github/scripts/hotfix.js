@@ -88,14 +88,19 @@ function hotfixReleaseAs(channel, currentVersion) {
  * *pós*-lançamento (o núcleo já foi publicado), a versão correta é a limpa, e
  * ela também precisa ser imposta com `--release-as`.
  *
- * Retorna `null` quando não há o que sanear: outro canal, versão atual sem
- * `-hf`, ou nenhum commit com impacto de versão (aí não há release nenhuma).
+ * Retorna `null` quando não há o que sanear: outro canal, ou versão atual sem
+ * `-hf`.
  */
 function postHotfixReleaseAs(channel, currentVersion, impact) {
   if (channel !== 'stable') return null;
   if (!isHotfixVersion(currentVersion)) return null;
-  if (!impact || impact === 'none') return null;
-  return bumpStable(currentVersion, impact);
+
+  // Impacto `none` não quer dizer "sem release": o release-please publica
+  // qualquer commit que caia numa seção visível do changelog — `ci:` e `docs:`
+  // caem —, e nesses casos o bump dele é PATCH. O piso replica isso. Se não
+  // houver nada publicável, ele não abre Release PR e a versão imposta é
+  // inócua: `--release-as` não cria release, só escolhe o número de uma.
+  return bumpStable(currentVersion, impact && impact !== 'none' ? impact : 'patch');
 }
 
 module.exports = {
