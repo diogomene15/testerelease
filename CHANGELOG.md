@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.2](https://github.com/diogomene15/testerelease/compare/v1.0.1-hf...v1.0.2) (2026-08-26)
+
+
+### 🐛 Correções
+
+* **saudacao:** trata nome nulo ou em branco sem quebrar a mensagem ([#31](https://github.com/diogomene15/testerelease/issues/31)) ([9fa111e](https://github.com/diogomene15/testerelease/commit/9fa111e159cbd8e354055ed904b1570cc104f5e3))
+
+
+### 🤖 CI/CD
+
+* **guards:** projeta a versão pelo critério de publicação do release-please ([#34](https://github.com/diogomene15/testerelease/issues/34)) ([b175833](https://github.com/diogomene15/testerelease/commit/b175833d4f3e73379504faa68ea4a1b51f95d4b8))
+
 ## [1.0.1-hf](https://github.com/diogomene15/testerelease/compare/v1.0.1...v1.0.1-hf) (2026-08-26)
 
 
