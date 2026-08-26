@@ -30,7 +30,7 @@ com uma regra de versão por destino:
 | --- | --- | --- |
 | `hotfix/*` → `main` | **merge commit** | núcleo preservado + `-hf`: `1.0.2` → `1.0.2-hf` → `1.0.2-hf.2` |
 | `hotfix/*` → `release` | **merge commit** | PATCH no núcleo: `1.0.1-rc.3` → `1.0.2-rc.1` |
-| `hotfix/*` → `develop` | **squash** | nenhuma — o título precisa ser `chore(hotfix): …` |
+| `hotfix/*--develop` → `develop` | **squash** | nenhuma — cherry-pick da correção, título `chore(hotfix): …` |
 
 Essas versões não saem de nenhuma estratégia do release-please: são calculadas
 em `.github/scripts/` e impostas a ele com `--release-as`.

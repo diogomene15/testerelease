@@ -11,7 +11,8 @@ retroportado para as outras duas branches permanentes.
  (produção)                    │                              │
                                ├──②──▶ release  (staging)     │  1.0.1-rc.3 → 1.0.2-rc.1
                                │                              │
-                               └──③──▶ develop (integração)   │  nenhuma versão
+                               └─ cherry-pick ─▶ hotfix/xyz--develop
+                                                  └──③──▶ develop           nenhuma versão
                                                               │
                                           ciclo normal segue ─┘
 ```
@@ -26,7 +27,7 @@ depois os dois back-merges. Sem ② e ③ a correção volta a sumir no próximo
 | --- | --- | --- | --- | --- |
 | ① | `hotfix/*` → `main` | merge commit | núcleo **preservado** + sufixo `-hf` | `1.0.2` → `1.0.2-hf` → `1.0.2-hf.2` → `1.0.2-hf.3` |
 | ② | `hotfix/*` → `release` | merge commit | **PATCH** no núcleo, contador de RC em 1 | `1.0.1-rc.3` → `1.0.2-rc.1` → `1.0.3-rc.1` |
-| ③ | `hotfix/*` → `develop` | squash | **nenhuma** | — |
+| ③ | `hotfix/*--develop` → `develop` | squash | **nenhuma** | — |
 
 As duas primeiras são simétricas e é isso que fecha o fluxo: em `main` o núcleo
 não pode mudar (a correção é publicada *sobre* a estável que já está rodando),
@@ -53,15 +54,16 @@ Depois disso o ciclo normal volta a fechar sozinho: com `main` em `1.0.2-hf` e
 `release` em `1.0.3-rc.1`, um `fix:` qualquer no ciclo produz `1.0.3-rc.2` — o
 mesmo alvo, contador avançando, como sempre.
 
-### ③ `hotfix/*` → `develop`
+### ③ `hotfix/*--develop` → `develop`
 
-`develop` não tem workflow de release, então nada acontece automaticamente. O
-cuidado aqui é outro: **o merge em `develop` é squash**, e um commit squashado
+`develop` não tem workflow de release, então nada acontece automaticamente. Os
+cuidados aqui são outros dois, e ambos vêm do **squash**: um commit squashado
 não guarda ancestralidade com os commits originais do hotfix. Quando `develop`
 voltasse para `release`, o release-please veria aquele `fix:` como novidade e
 geraria um **terceiro** bump para a mesma correção.
 
-Por isso o guard exige que o back-merge seja neutro:
+A primeira consequência é de versão, e o guard a cobre exigindo um back-merge
+neutro:
 
 | Exigência | Valor |
 | --- | --- |
@@ -71,6 +73,16 @@ Por isso o guard exige que o back-merge seja neutro:
 
 Sem essa exceção, a regra normal de coerência acusaria a label `changes: chore`
 de subestimar o `fix:` que está dentro do PR.
+
+A segunda é de conteúdo: a branch `hotfix/*` saiu de `main` e carrega o estado
+de release das outras duas branches, que o squash transforma em divergência
+permanente (armadilha 5). Por isso o PR ③ sai de uma branch derivada de
+`develop`, com a correção aplicada por cherry-pick:
+
+```bash
+git switch -c hotfix/login-500--develop develop
+git cherry-pick <sha da correção>
+```
 
 ## Passo a passo
 
@@ -93,15 +105,26 @@ gh pr create --base release --head hotfix/login-500 \
   --label hotfix
 # merge commit → workflow `Release Candidate` publica v1.0.3-rc.1
 
-# ③ retroportar para integração (neutro)
-gh pr create --base develop --head hotfix/login-500 \
+# ③ retroportar para integração (neutro, só a correção)
+git switch -c hotfix/login-500--develop develop
+git cherry-pick <sha da correção>
+git push -u origin hotfix/login-500--develop
+
+gh pr create --base develop --head hotfix/login-500--develop \
   --title "chore(hotfix): retroporta correção do login para develop" \
   --label "changes: chore" --label hotfix
 # squash → nenhuma versão
 ```
 
-A branch `hotfix/*` só é apagada depois dos três merges — ela é a origem comum
-dos três PRs.
+O terceiro PR sai de uma branch **derivada de `develop`**, com a correção
+aplicada por cherry-pick — não da `hotfix/*` original. O motivo está na
+armadilha 5: a `hotfix/*` saiu de `main` e carrega junto o estado de release
+das duas outras branches, que num squash vira divergência permanente. O sufixo
+`--develop` mantém o prefixo `hotfix/`, então o guard continua reconhecendo o
+back-merge.
+
+A branch `hotfix/*` só é apagada depois dos três merges — ela é a origem dos
+dois primeiros PRs e do cherry-pick do terceiro.
 
 ## Como o release-please é levado a produzir essas versões
 
@@ -246,7 +269,53 @@ publica **qualquer** commit que caia numa seção visível do changelog — `ci:
 como `1.0.1-hf`. Impor uma versão nunca cria uma release: se o changelog sair
 vazio, o release-please não abre Release PR nenhum.
 
-### 5. Branch sem o prefixo `hotfix/`
+### 5. O squash em `develop` leva junto o estado de release de `main`
+
+A branch `hotfix/*` sai de `main`, então ela carrega tudo o que só existe lá:
+`CHANGELOG.md`, `version.txt`, `.release-please-manifest.json` — e também o
+estado do **track de RC** como estava na última promoção.
+
+Nos PRs ① e ② isso é inofensivo, porque merge commit preserva ancestralidade e
+o git sabe que aqueles arquivos não foram tocados pelo hotfix. No PR ③ não: o
+squash cria um commit novo, sem ancestralidade, em que `develop` **modificou**
+`CHANGELOG-RC.md` e `.release-please-manifest-rc.json` para o conteúdo antigo.
+Enquanto isso `release` publicou a RC do retroporte e avançou os mesmos
+arquivos. O próximo `develop → release` conflita:
+
+```
+CONFLICT (content): Merge conflict in .release-please-manifest-rc.json
+CONFLICT (content): Merge conflict in CHANGELOG-RC.md
+```
+
+E o conflito não é um incidente isolado: ele se repete a cada hotfix, sempre nos
+mesmos dois arquivos. Por isso o back-merge ③ é feito por **cherry-pick** numa
+branch derivada de `develop` — assim o PR contém a correção e nada mais.
+
+Se um `develop` já ficou divergente, o conserto é restaurar os arquivos do
+track a partir de `release` e mandar pelo fluxo normal:
+
+```bash
+git switch -c chore/estado-rc-develop develop
+git checkout origin/release -- CHANGELOG-RC.md .release-please-manifest-rc.json
+```
+
+### 6. Um PR conflitante não dispara workflow nenhum
+
+Consequência prática da armadilha anterior, e ela engana: eventos
+`pull_request` rodam sobre o merge simulado, que o GitHub não consegue criar
+quando há conflito. O PR fica sem **nenhum** check — não um check vermelho, mas
+a ausência completa dele:
+
+```
+$ gh pr checks 35
+no checks reported on the 'develop' branch
+```
+
+Como os guards são status checks obrigatórios, um PR nesse estado nunca fica
+mergeável e não há erro para ler. Confira `mergeable` antes de procurar o run:
+`gh pr view <n> --json mergeable`.
+
+### 7. Branch sem o prefixo `hotfix/`
 
 Toda a detecção depende dele. Uma branch `fix/login-500` abrindo PR para `main`
 é barrada pelo guard (só `release` e `hotfix/*` podem); mas se o guard for
