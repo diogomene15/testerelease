@@ -40,7 +40,7 @@ jobs:
           script: |
             const { execFileSync } = require('child_process');
             const { parseConventional, highestImpact, releaseImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
-            const { bumpStable, stableCore, nextHotfix, nextRcForHotfix } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
+            const { bumpStable, stableCore, nextHotfix, nextRcForHotfix, isHotfixVersion } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
             const { isHotfixBranch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/hotfix.js`);
 
             const pr = context.payload.pull_request;
@@ -126,9 +126,21 @@ jobs:
                 ''
               );
             } else if (currentRc !== '0.0.0' && stableCore(currentRc) !== projected) {
+              // Depois de um hotfix os dois núcleos divergem por construção:
+              // `main` preserva o seu e `release` avança um PATCH por retroporte.
+              // Só é sinal de problema quando a estável atual não é um `-hf`.
               lines.push(
-                `> ⚠️ A RC homologada (\`v${currentRc}\`) aponta para \`v${stableCore(currentRc)}\`, `,
-                `> mas a promoção calculou \`v${projected}\`. Confira se \`release\` está em dia com \`main\`.`,
+                ...(isHotfixVersion(lastStable)
+                  ? [
+                      `> ℹ️ A RC homologada (\`v${currentRc}\`) aponta para \`v${stableCore(currentRc)}\`, mas a`,
+                      `> promoção calculou \`v${projected}\`. É o esperado depois de um hotfix: produção ficou`,
+                      `> em \`v${lastStable}\` sem avançar o núcleo, enquanto \`release\` avançou um PATCH no`,
+                      '> retroporte. Ver [`docs/HOTFIX.md`](../blob/main/docs/HOTFIX.md#os-dois-núcleos-divergem-e-isso-é-esperado).',
+                    ]
+                  : [
+                      `> ⚠️ A RC homologada (\`v${currentRc}\`) aponta para \`v${stableCore(currentRc)}\`, `,
+                      `> mas a promoção calculou \`v${projected}\`. Confira se \`release\` está em dia com \`main\`.`,
+                    ]),
                 ''
               );
             }
