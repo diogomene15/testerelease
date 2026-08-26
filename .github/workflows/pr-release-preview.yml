@@ -157,7 +157,7 @@ jobs:
             const fs = require('fs');
             const { execFileSync } = require('child_process');
             const { parseConventional, highestImpact, releaseImpact } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/validate-pr.js`);
-            const { nextRc, stableCore } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
+            const { nextRc, stableCore, bumpStable, compareVersions } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/compute-version.js`);
 
             const pr = context.payload.pull_request;
             const hotfixReleaseAs = process.env.HOTFIX_RELEASE_AS || null;
@@ -216,6 +216,14 @@ jobs:
                 ? 'calculada pelo `release-please`'
                 : '⚠️ projeção local — o dry-run não retornou versão';
 
+            // O núcleo da RC costuma ser o alvo da promoção, mas depois de um
+            // hotfix a estável pode estar à frente dele: produção publicou o
+            // PATCH saneado enquanto a RC ainda mira o núcleo do retroporte.
+            // Quem promove vê o maior dos dois.
+            const estavelAoPromover = compareVersions(stableCore(version), lastStable) > 0
+              ? stableCore(version)
+              : bumpStable(lastStable, bump);
+
             const IMPACT_LABEL = {
               major: '`MAJOR` — quebra de compatibilidade',
               minor: '`MINOR` — nova funcionalidade',
@@ -260,7 +268,7 @@ jobs:
               `| Impacto dos commits | ${IMPACT_LABEL[impact]} |`,
               `| **Versão que será gerada** | **\`v${version}\`** |`,
               `| Origem do cálculo | ${origem} |`,
-              `| Estável correspondente | \`v${stableCore(version)}\` (ao promover para \`main\`) |`,
+              `| Estável correspondente | \`v${estavelAoPromover}\` (ao promover para \`main\`) |`,
               `| Commits analisados | ${relevant.length} semânticos / ${parsed.length} totais |`,
               '',
             ];
