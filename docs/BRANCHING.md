@@ -13,7 +13,8 @@ feature/*  ──squash──▶  develop  ──merge──▶  release  ──
 
 main ──▶ hotfix/*  ──merge──▶  main       vX.Y.Z-hf      (núcleo preservado)
                    ──merge──▶  release   vX.Y.(Z+1)-rc.1  (PATCH no núcleo)
-                   ──squash──▶ develop   nenhuma versão
+                   ─cherry-pick─▶ hotfix/*--develop ──squash──▶ develop
+                                                     nenhuma versão
 ```
 
 ## As três transições do ciclo
@@ -76,7 +77,7 @@ Documentada por inteiro em [`HOTFIX.md`](HOTFIX.md). O resumo:
 | --- | --- | --- |
 | `hotfix/*` → `main` | merge commit | núcleo preservado + `-hf` (`1.0.2` → `1.0.2-hf` → `1.0.2-hf.2`) |
 | `hotfix/*` → `release` | merge commit | PATCH no núcleo (`1.0.1-rc.3` → `1.0.2-rc.1`) |
-| `hotfix/*` → `develop` | squash | nenhuma — título tem de ser neutro (`chore(hotfix): …`) |
+| `hotfix/*--develop` → `develop` | squash | nenhuma — título tem de ser neutro (`chore(hotfix): …`) |
 
 Nenhuma dessas versões sai de uma estratégia do release-please: elas são
 calculadas em `.github/scripts/` e impostas com `--release-as`.
